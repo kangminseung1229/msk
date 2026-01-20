@@ -3,8 +3,10 @@ package ai.langgraph4j.msk.service;
 import org.springframework.stereotype.Service;
 
 import com.google.genai.Client;
+import com.google.genai.types.Content;
 import com.google.genai.types.GenerateContentConfig;
 import com.google.genai.types.GenerateContentResponse;
+import com.google.genai.types.Part;
 import com.google.genai.types.ThinkingConfig;
 import com.google.genai.types.ThinkingLevel;
 
@@ -73,5 +75,38 @@ public class GeminiTextService {
 				param != null ? param : "How does AI work?", config);
 
 		return response.text();
+	}
+
+	/**
+	 * System Instruction을 사용하여 텍스트를 생성합니다.
+	 * System Instruction은 모델의 역할, 동작 방식, 응답 스타일 등을 정의합니다.
+	 * 
+	 * @param systemInstruction 모델의 역할과 동작 방식을 정의하는 지시사항
+	 * @param userPrompt        실제 사용자의 질문이나 요청
+	 * @param model             사용할 모델명 (선택사항, 기본값: gemini-3-flash-preview)
+	 * @return 생성된 텍스트 응답
+	 */
+	public String systemInstruction(String systemInstruction, String userPrompt, String model) {
+		String modelName = (model != null && !model.isEmpty()) ? model : "gemini-3-flash-preview";
+
+		GenerateContentConfig config = GenerateContentConfig.builder()
+				.systemInstruction(Content.fromParts(Part.fromText(systemInstruction)))
+				.build();
+
+		GenerateContentResponse response = client.models.generateContent(modelName,
+				userPrompt, config);
+
+		return response.text();
+	}
+
+	/**
+	 * System Instruction을 사용하여 텍스트를 생성합니다 (기본 모델 사용).
+	 * 
+	 * @param systemInstruction 모델의 역할과 동작 방식을 정의하는 지시사항
+	 * @param userPrompt        실제 사용자의 질문이나 요청
+	 * @return 생성된 텍스트 응답
+	 */
+	public String systemInstruction(String systemInstruction, String userPrompt) {
+		return systemInstruction(systemInstruction, userPrompt, "gemini-3-flash-preview");
 	}
 }

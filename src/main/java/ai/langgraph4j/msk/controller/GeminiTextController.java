@@ -8,6 +8,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import ai.langgraph4j.msk.controller.dto.SystemInstructionRequest;
 import ai.langgraph4j.msk.controller.dto.TextGenerationRequest;
 import ai.langgraph4j.msk.controller.dto.TextGenerationResponse;
 import ai.langgraph4j.msk.service.GeminiTextService;
@@ -82,8 +83,27 @@ public class GeminiTextController {
 	}
 
 	@PostMapping("/thinking")
-	public String thinking(@RequestBody String prompt) {
-		return geminiTextService.thinking(prompt);
+	public ResponseEntity<String> thinking(@RequestBody String prompt) {
+		return ResponseEntity.ok(geminiTextService.thinking(prompt));
 	}
-	
+
+	/**
+	 * System Instruction을 사용하여 텍스트를 생성합니다.
+	 * System Instruction은 모델의 역할, 동작 방식, 응답 스타일 등을 정의합니다.
+	 * 
+	 * @param request System Instruction과 User Prompt를 포함한 요청
+	 * @return 생성된 텍스트 응답
+	 */
+	@PostMapping("/system-instruction")
+	public ResponseEntity<String> systemInstruction(@RequestBody SystemInstructionRequest request) {
+		String model = (request.getModel() != null && !request.getModel().isEmpty())
+				? request.getModel()
+				: "gemini-3-flash-preview";
+
+		return ResponseEntity.ok(geminiTextService.systemInstruction(
+				request.getSystemInstruction(),
+				request.getUserPrompt(),
+				model));
+	}
+
 }

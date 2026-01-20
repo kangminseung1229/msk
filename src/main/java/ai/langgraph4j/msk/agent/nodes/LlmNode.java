@@ -8,24 +8,31 @@ import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.retry.NonTransientAiException;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
 import ai.langgraph4j.msk.agent.state.AgentState;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.data.message.AiMessage;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
  * LLM 호출 노드
  * Spring AI ChatModel을 사용하여 LLM을 호출하고 응답을 생성합니다.
+ * 
+ * AgentGraph에서 사용되며, Gemini API를 통해 LLM 응답을 생성합니다.
+ * 
+ * @Qualifier("chatModel")을 사용하여 AiConfig에서 생성한 chatModel Bean을 명시적으로 지정합니다.
  */
 @Slf4j
 @Component
-@RequiredArgsConstructor
 public class LlmNode {
 
 	private final ChatModel chatModel;
+
+	public LlmNode(@Qualifier("chatModel") ChatModel chatModel) {
+		this.chatModel = chatModel;
+	}
 
 	/**
 	 * LLM을 호출하여 응답 생성

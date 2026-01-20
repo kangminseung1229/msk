@@ -10,6 +10,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
 
 import com.google.genai.Client;
 
@@ -18,6 +19,7 @@ import com.google.genai.Client;
  * ChatModel과 ChatClient를 Bean으로 등록합니다.
  */
 @Configuration
+@org.springframework.context.annotation.Profile("!test")
 public class AiConfig {
 
 	@Value("${spring.ai.google.genai.api-key:}")
@@ -34,17 +36,17 @@ public class AiConfig {
 	 */
 	@Bean
 	@ConditionalOnMissingBean(Client.class)
-	@ConditionalOnProperty(name = "spring.ai.google.genai.api-key")
+	@ConditionalOnProperty(name = "spring.ai.google.genai.api-key", matchIfMissing = false)
 	public Client googleGenAiClient() {
 		// 환경변수나 시스템 프로퍼티에서 직접 읽기 시도
 		String key = apiKey;
-		if (key == null || key.isEmpty()) {
+		if (key == null || key.isEmpty() || key.trim().isEmpty()) {
 			key = System.getProperty("spring.ai.google.genai.api-key");
 		}
-		if (key == null || key.isEmpty()) {
+		if (key == null || key.isEmpty() || key.trim().isEmpty()) {
 			key = System.getenv("GEMINI_API_KEY");
 		}
-		if (key == null || key.isEmpty()) {
+		if (key == null || key.isEmpty() || key.trim().isEmpty()) {
 			throw new IllegalStateException(
 					"Google GenAI API key is not configured. Please set spring.ai.google.genai.api-key or GEMINI_API_KEY environment variable.");
 		}
@@ -56,9 +58,11 @@ public class AiConfig {
 	/**
 	 * ChatModel Bean 생성
 	 * Spring AI 자동 설정이 작동하지 않을 경우를 대비하여 명시적으로 생성합니다.
+	 * 
+	 * @Primary를 사용하여 자동 설정의 Bean보다 우선순위를 가집니다.
 	 */
 	@Bean
-	@ConditionalOnMissingBean(ChatModel.class)
+	@Primary
 	@ConditionalOnBean(Client.class)
 	public ChatModel chatModel(Client genAiClient) {
 		// 모델명이 null이면 기본값 사용
