@@ -41,6 +41,7 @@ dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-web'
 	implementation 'org.springframework.boot:spring-boot-starter-actuator'
 	implementation 'org.springframework.boot:spring-boot-starter-validation'
+	implementation 'org.springframework.boot:spring-boot-starter-thymeleaf'
 	
 	// Spring AI - Google GenAI (Gemini with API key support)
 	implementation 'org.springframework.ai:spring-ai-starter-model-google-genai'
@@ -71,4 +72,9 @@ dependencies {
 
 tasks.named('test') {
 	useJUnitPlatform()
+}
+
+// 컴파일 시 파라미터 이름 정보 보존 (Spring @RequestParam 등에서 필요)
+tasks.withType(JavaCompile) {
+	options.compilerArgs += ['-parameters']
 }

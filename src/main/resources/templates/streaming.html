@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gemini 스트리밍 테스트</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            width: 100%;
+            max-width: 900px;
+            padding: 40px;
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 30px;
+            font-size: 28px;
+            text-align: center;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: #555;
+            font-weight: 500;
+            font-size: 14px;
+        }
+
+        input,
+        textarea {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 14px;
+            font-family: inherit;
+            transition: border-color 0.3s;
+        }
+
+        input:focus,
+        textarea:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        textarea {
+            resize: vertical;
+            min-height: 100px;
+        }
+
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 14px 28px;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            width: 100%;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        button:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+        }
+
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .response-container {
+            margin-top: 30px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            border: 2px solid #e0e0e0;
+            min-height: 200px;
+            max-height: 500px;
+            overflow-y: auto;
+        }
+
+        .response-content {
+            color: #333;
+            line-height: 1.8;
+            font-size: 15px;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+
+        .response-content::after {
+            content: '▋';
+            animation: blink 1s infinite;
+            color: #667eea;
+        }
+
+        @keyframes blink {
+
+            0%,
+            50% {
+                opacity: 1;
+            }
+
+            51%,
+            100% {
+                opacity: 0;
+            }
+        }
+
+        .status {
+            margin-top: 15px;
+            padding: 10px;
+            border-radius: 6px;
+            font-size: 13px;
+            text-align: center;
+        }
+
+        .status.connecting {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .status.streaming {
+            background: #d1ecf1;
+            color: #0c5460;
+        }
+
+        .status.complete {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>🤖 Gemini 스트리밍 테스트</h1>
+
+        <form id="streamingForm">
+            <div class="form-group">
+                <label for="systemInstruction">System Instruction (선택사항)</label>
+                <textarea id="systemInstruction" name="systemInstruction"
+                    placeholder="예: 당신은 친절한 AI 어시스턴트입니다. 항상 존댓말로 답변하세요."></textarea>
+            </div>
+
+            <div class="form-group">
+                <label for="userPrompt">User Prompt *</label>
+                <textarea id="userPrompt" name="userPrompt" required placeholder="질문을 입력하세요..."></textarea>
+            </div>
+
+            <div class="form-group">
+                <label for="model">Model (선택사항)</label>
+                <input type="text" id="model" name="model" placeholder="기본값: gemini-3-flash-preview"
+                    value="gemini-3-flash-preview">
+            </div>
+
+            <button type="submit" id="submitBtn">스트리밍 시작</button>
+        </form>
+
+        <div id="status" class="status hidden"></div>
+
+        <div class="response-container hidden" id="responseContainer">
+            <div class="response-content" id="responseContent"></div>
+        </div>
+    </div>
+
+    <script>
+        const form = document.getElementById('streamingForm');
+        const submitBtn = document.getElementById('submitBtn');
+        const responseContainer = document.getElementById('responseContainer');
+        const responseContent = document.getElementById('responseContent');
+        const status = document.getElementById('status');
+        let eventSource = null;
+
+        form.addEventListener('submit', function (e) {
+            e.preventDefault();
+
+            const systemInstruction = document.getElementById('systemInstruction').value;
+            const userPrompt = document.getElementById('userPrompt').value;
+            const model = document.getElementById('model').value;
+
+            if (!userPrompt.trim()) {
+                alert('User Prompt를 입력해주세요.');
+                return;
+            }
+
+            // 기존 연결 종료
+            if (eventSource) {
+                eventSource.close();
+            }
+
+            // UI 초기화
+            responseContent.textContent = '';
+            responseContainer.classList.remove('hidden');
+            submitBtn.disabled = true;
+            status.classList.remove('hidden');
+            status.className = 'status connecting';
+            status.textContent = '연결 중...';
+
+            // SSE URL 구성
+            let url = '/api/gemini/streaming-sse?userPrompt=' + encodeURIComponent(userPrompt);
+            if (systemInstruction) {
+                url += '&systemInstruction=' + encodeURIComponent(systemInstruction);
+            }
+            if (model) {
+                url += '&model=' + encodeURIComponent(model);
+            }
+
+            // EventSource로 SSE 연결
+            eventSource = new EventSource(url);
+
+            eventSource.addEventListener('message', function (event) {
+                const data = event.data;
+                responseContent.textContent += data;
+                status.className = 'status streaming';
+                status.textContent = '스트리밍 중...';
+
+                // 자동 스크롤
+                responseContainer.scrollTop = responseContainer.scrollHeight;
+            });
+
+            eventSource.addEventListener('complete', function (event) {
+                status.className = 'status complete';
+                status.textContent = '스트리밍 완료';
+                submitBtn.disabled = false;
+                eventSource.close();
+                eventSource = null;
+            });
+
+            eventSource.onerror = function (error) {
+                console.error('SSE 오류:', error);
+                status.className = 'status error';
+                status.textContent = '오류가 발생했습니다.';
+                submitBtn.disabled = false;
+                if (eventSource) {
+                    eventSource.close();
+                    eventSource = null;
+                }
+            };
+        });
+    </script>
+</body>
+
+</html>

@@ -1,6 +1,10 @@
 package ai.langgraph4j.msk.service;
 
+import java.io.IOException;
+import java.util.concurrent.CompletableFuture;
+
 import org.springframework.stereotype.Service;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import com.google.genai.Client;
 import com.google.genai.ResponseStream;
@@ -128,5 +132,57 @@ public class GeminiTextService {
 			System.out.print(res.text());
 		}
 		responseStream.close();
+	}
+
+	/**
+	 * System Instruction을 사용하여 스트리밍 텍스트를 생성합니다.
+	 * SseEmitter를 통해 실시간으로 응답을 전송합니다.
+	 * 
+	 * @param systemInstruction 모델의 역할과 동작 방식을 정의하는 지시사항
+	 * @param userPrompt        실제 사용자의 질문이나 요청
+	 * @param model             사용할 모델명 (선택사항, 기본값: gemini-3-flash-preview)
+	 * @return SseEmitter 스트리밍 응답을 위한 emitter
+	 */
+	public SseEmitter streamingSse(String systemInstruction, String userPrompt, String model) {
+		String modelName = (model != null && !model.isEmpty()) ? model : "gemini-3-flash-preview";
+
+		SseEmitter emitter = new SseEmitter(Long.MAX_VALUE); // 타임아웃 없음
+
+		CompletableFuture.runAsync(() -> {
+			try {
+				GenerateContentConfig config = null;
+				if (systemInstruction != null && !systemInstruction.isEmpty()) {
+					config = GenerateContentConfig.builder()
+							.systemInstruction(Content.fromParts(Part.fromText(systemInstruction)))
+							.build();
+				}
+
+				ResponseStream<GenerateContentResponse> responseStream = client.models.generateContentStream(
+						modelName, userPrompt, config);
+
+				for (GenerateContentResponse res : responseStream) {
+					String text = res.text();
+					if (text != null && !text.isEmpty()) {
+						emitter.send(SseEmitter.event()
+								.name("message")
+								.data(text));
+					}
+				}
+				responseStream.close();
+
+				emitter.send(SseEmitter.event()
+						.name("complete")
+						.data("스트리밍 완료"));
+				emitter.complete();
+			} catch (IOException e) {
+				log.error("스트리밍 중 오류 발생", e);
+				emitter.completeWithError(e);
+			} catch (Exception e) {
+				log.error("스트리밍 중 오류 발생", e);
+				emitter.completeWithError(e);
+			}
+		});
+
+		return emitter;
 	}
 }

@@ -1,5 +1,6 @@
 package ai.langgraph4j.msk.controller;
 
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -7,6 +8,8 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.ModelAndView;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import ai.langgraph4j.msk.controller.dto.SystemInstructionRequest;
 import ai.langgraph4j.msk.controller.dto.TextGenerationRequest;
@@ -64,8 +67,8 @@ public class GeminiTextController {
 	 */
 	@GetMapping("/generate")
 	public ResponseEntity<TextGenerationResponse> generateTextGet(
-			@RequestParam String prompt,
-			@RequestParam(required = false, defaultValue = "gemini-3-flash-preview") String model) {
+			@RequestParam(name = "prompt") String prompt,
+			@RequestParam(name = "model", required = false, defaultValue = "gemini-3-flash-preview") String model) {
 		log.info("GeminiTextController: GET 텍스트 생성 요청 - 모델: {}, 프롬프트: {}", model, prompt);
 
 		try {
@@ -110,6 +113,34 @@ public class GeminiTextController {
 	public ResponseEntity<String> streaming(@RequestBody SystemInstructionRequest request) {
 		geminiTextService.streaming(request.getSystemInstruction(), request.getUserPrompt(), request.getModel());
 		return ResponseEntity.ok("streaming completed");
+	}
+
+	/**
+	 * 타임리프 스트리밍 페이지를 반환합니다.
+	 * 
+	 * @return 스트리밍 UI 페이지
+	 */
+	@GetMapping("/streaming-page")
+	public ModelAndView streamingPage() {
+		return new ModelAndView("streaming");
+	}
+
+	/**
+	 * SSE를 사용한 스트리밍 응답 엔드포인트
+	 * 
+	 * @param systemInstruction System Instruction
+	 * @param userPrompt        User Prompt
+	 * @param model             모델명
+	 * @return SseEmitter
+	 */
+	@GetMapping(value = "/streaming-sse", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+	public SseEmitter streamingSse(
+			@RequestParam(name = "systemInstruction", required = false) String systemInstruction,
+			@RequestParam(name = "userPrompt") String userPrompt,
+			@RequestParam(name = "model", required = false) String model) {
+		log.info("스트리밍 요청 - systemInstruction: {}, userPrompt: {}, model: {}",
+				systemInstruction, userPrompt, model);
+		return geminiTextService.streamingSse(systemInstruction, userPrompt, model);
 	}
 
 }
