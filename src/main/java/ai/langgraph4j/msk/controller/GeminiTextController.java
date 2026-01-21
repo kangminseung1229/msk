@@ -38,14 +38,19 @@ public class GeminiTextController {
 	 */
 	@PostMapping("/generate")
 	public ResponseEntity<TextGenerationResponse> generateText(@RequestBody TextGenerationRequest request) {
-		log.info("GeminiTextController: 텍스트 생성 요청 - {}", request.getPrompt());
+		log.info("GeminiTextController: 텍스트 생성 요청 - {}, includeThoughts: {}",
+				request.getPrompt(), request.getIncludeThoughts());
 
 		try {
 			String model = (request.getModel() != null && !request.getModel().isEmpty())
 					? request.getModel()
 					: "gemini-3-flash-preview";
 
-			String response = geminiTextService.generateText(request.getPrompt(), model);
+			Boolean includeThoughts = request.getIncludeThoughts() != null
+					? request.getIncludeThoughts()
+					: false;
+
+			String response = geminiTextService.generateText(request.getPrompt(), model, includeThoughts);
 
 			TextGenerationResponse responseDto = new TextGenerationResponse();
 			responseDto.setResponse(response);
@@ -68,11 +73,13 @@ public class GeminiTextController {
 	@GetMapping("/generate")
 	public ResponseEntity<TextGenerationResponse> generateTextGet(
 			@RequestParam(name = "prompt") String prompt,
-			@RequestParam(name = "model", required = false, defaultValue = "gemini-3-flash-preview") String model) {
-		log.info("GeminiTextController: GET 텍스트 생성 요청 - 모델: {}, 프롬프트: {}", model, prompt);
+			@RequestParam(name = "model", required = false, defaultValue = "gemini-3-flash-preview") String model,
+			@RequestParam(name = "includeThoughts", required = false, defaultValue = "false") Boolean includeThoughts) {
+		log.info("GeminiTextController: GET 텍스트 생성 요청 - 모델: {}, 프롬프트: {}, includeThoughts: {}",
+				model, prompt, includeThoughts);
 
 		try {
-			String response = geminiTextService.generateText(prompt, model);
+			String response = geminiTextService.generateText(prompt, model, includeThoughts);
 
 			TextGenerationResponse responseDto = new TextGenerationResponse();
 			responseDto.setResponse(response);

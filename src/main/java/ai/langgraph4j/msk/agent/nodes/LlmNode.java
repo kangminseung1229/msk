@@ -130,6 +130,11 @@ public class LlmNode {
 
 	/**
 	 * 대화 히스토리를 Spring AI Message 리스트로 변환
+	 * 
+	 * Phase 3: Spring AI Tool 자동 호출
+	 * Spring AI가 자동으로 Tool을 호출하고 결과를 LLM에 전달하므로,
+	 * Tool 실행 결과를 수동으로 추가할 필요가 없습니다.
+	 * Spring AI가 내부에서 Tool 실행 결과를 처리하고 LLM에 전달합니다.
 	 */
 	private List<Message> prepareMessages(AgentState state) {
 		List<Message> messages = new ArrayList<>();
@@ -140,15 +145,15 @@ public class LlmNode {
 					state.getUserMessage().singleText()));
 		}
 
-		// 도구 실행 결과가 있으면 추가
-		if (!state.getToolExecutionResults().isEmpty()) {
-			StringBuilder toolResults = new StringBuilder("도구 실행 결과:\n");
-			for (AgentState.ToolExecutionResult result : state.getToolExecutionResults()) {
-				toolResults.append("- ").append(result.getToolName())
-						.append(": ").append(result.getResult()).append("\n");
-			}
-			messages.add(new org.springframework.ai.chat.messages.UserMessage(toolResults.toString()));
-		}
+		// Phase 3: Spring AI Tool 자동 호출
+		// Spring AI가 자동으로 Tool을 호출하고 결과를 LLM에 전달하므로,
+		// Tool 실행 결과를 수동으로 추가할 필요가 없습니다.
+		// Spring AI가 내부에서 Tool 실행 결과를 처리하고 LLM에 전달합니다.
+		//
+		// 참고: 현재는 단일 턴 대화를 지원하지만, 향후 멀티 턴 대화를 지원하려면
+		// state.getMessages()의 이전 대화 히스토리도 포함해야 합니다.
+		// 하지만 Spring AI가 Tool 실행을 자동으로 처리하므로, Tool 실행 결과는
+		// Spring AI 내부에서 관리됩니다.
 
 		return messages;
 	}

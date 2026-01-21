@@ -6,6 +6,7 @@ import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.google.genai.GoogleGenAiChatModel;
 import org.springframework.ai.google.genai.GoogleGenAiChatOptions;
+import org.springframework.ai.google.genai.common.GoogleGenAiThinkingLevel;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
@@ -17,10 +18,13 @@ import org.springframework.context.annotation.Primary;
 
 import com.google.genai.Client;
 
+import lombok.extern.slf4j.Slf4j;
+
 /**
  * Spring AI 설정 클래스
  * ChatModel과 ChatClient를 Bean으로 등록합니다.
  */
+@Slf4j
 @Configuration
 @org.springframework.context.annotation.Profile("!test")
 public class AiConfig {
@@ -28,7 +32,7 @@ public class AiConfig {
 	@Value("${spring.ai.google.genai.api-key:}")
 	private String apiKey;
 
-	@Value("${spring.ai.google.genai.chat.options.model:gemini-1.5-flash}")
+	@Value("${spring.ai.google.genai.chat.options.model:gemini-3-flash-preview}")
 	private String model;
 
 	@Value("${spring.ai.google.genai.chat.options.temperature:0.7}")
@@ -73,10 +77,10 @@ public class AiConfig {
 		// 모델명이 null이면 기본값 사용
 		String modelName = model;
 		if (modelName == null || modelName.isEmpty()) {
-			modelName = System.getProperty("spring.ai.google.genai.chat.options.model", "gemini-1.5-flash");
+			modelName = System.getProperty("spring.ai.google.genai.chat.options.model", "gemini-3-flash-preview");
 		}
 		if (modelName == null || modelName.isEmpty()) {
-			modelName = "gemini-1.5-flash"; // 최종 기본값 (무료 티어에서 사용 가능)
+			modelName = "gemini-3-flash-preview"; // 최종 기본값
 		}
 
 		// Temperature가 null이면 기본값 사용
@@ -97,12 +101,30 @@ public class AiConfig {
 		// 4. Tool 실행 결과를 LLM에 다시 전달하여 최종 응답 생성
 		//
 		// 즉, 우리는 Tool을 등록만 하고, LLM이 질문에 따라 적절한 Tool을 자동으로 선택하고 호출합니다.
-		GoogleGenAiChatOptions chatOptions = GoogleGenAiChatOptions.builder()
+		//
+		// Gemini 3 모델(gemini-3-flash-preview, gemini-3-pro-preview 등) 사용 시
+		// thought_signature 처리:
+		// - Gemini 3 모델은 Tool 호출 시 thought_signature가 필요합니다.
+		// - Spring AI 1.1.1 이상에서 includeThoughts(true)와 thinkingLevel을 설정하면
+		//   internalToolExecutionEnabled(true)와 함께 자동으로 처리됩니다.
+		boolean isGemini3Model = modelName != null && modelName.contains("gemini-3");
+
+		GoogleGenAiChatOptions.Builder optionsBuilder = GoogleGenAiChatOptions.builder()
 				.model(modelName)
 				.temperature(temp)
 				.toolCallbacks(toolCallbacks) // Tool 메타데이터를 LLM에 제공 (LLM이 Tool 선택 가능하도록)
-				.internalToolExecutionEnabled(true) // LLM이 선택한 Tool을 Spring AI가 자동으로 실행
-				.build();
+				.internalToolExecutionEnabled(true); // LLM이 선택한 Tool을 Spring AI가 자동으로 실행
+
+		// Gemini 3 모델인 경우 thought_signature 지원
+		// Spring AI 1.1.1 이상에서 includeThoughts와 thinkingLevel을 직접 사용할 수 있습니다.
+		if (isGemini3Model) {
+			optionsBuilder
+					.thinkingLevel(GoogleGenAiThinkingLevel.HIGH)
+					.includeThoughts(true);
+			log.info("Gemini 3 모델 사용: thinkingLevel(HIGH) 및 includeThoughts(true) 설정 완료");
+		}
+
+		GoogleGenAiChatOptions chatOptions = optionsBuilder.build();
 
 		return GoogleGenAiChatModel.builder()
 				.genAiClient(genAiClient)

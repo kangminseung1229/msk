@@ -197,3 +197,7 @@ content-type: application/json
   "message": "안녕하세요! 오늘 날씨가 어때요?",
   "sessionId": "test-session-2"
 }
+
+### signature test
+GET http://localhost:8080/api/gemini/generate?prompt=What+is+the+capital+of+France?&includeThoughts=true
+Content-Type: application/json

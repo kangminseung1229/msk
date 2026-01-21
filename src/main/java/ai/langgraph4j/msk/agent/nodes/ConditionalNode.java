@@ -8,6 +8,10 @@ import org.springframework.stereotype.Component;
 /**
  * 조건 분기 노드
  * 현재 상태를 기반으로 다음 노드를 결정합니다.
+ * 
+ * Phase 3: Spring AI Tool 자동 호출
+ * Spring AI가 자동으로 Tool을 호출하고 결과를 LLM에 전달하므로,
+ * Tool 실행 요청 체크가 필요 없습니다. Spring AI가 내부에서 모든 Tool 실행을 처리합니다.
  */
 @Slf4j
 @Component
@@ -19,8 +23,12 @@ public class ConditionalNode {
 	/**
 	 * 다음 노드를 결정하는 라우팅 함수
 	 * 
+	 * Phase 3: Spring AI Tool 자동 호출
+	 * Spring AI가 자동으로 Tool을 호출하고 결과를 LLM에 전달하므로,
+	 * Tool 실행 요청 체크가 필요 없습니다. Spring AI가 내부에서 모든 Tool 실행을 처리합니다.
+	 * 
 	 * @param state 현재 상태
-	 * @return 다음 노드 이름 ("tool", "response", "error")
+	 * @return 다음 노드 이름 ("response", "error")
 	 */
 	public String route(AgentState state) {
 		log.debug("ConditionalNode: 다음 노드 결정 시작, 반복 횟수: {}", state.getIterationCount());
@@ -33,12 +41,10 @@ public class ConditionalNode {
 			return "error";
 		}
 		
-		// 도구 실행이 필요한 경우
-		if (state.getToolExecutionRequests() != null && 
-		    !state.getToolExecutionRequests().isEmpty()) {
-			log.debug("ConditionalNode: 도구 실행 필요, ToolNode로 이동");
-			return "tool";
-		}
+		// Phase 3: Spring AI Tool 자동 호출
+		// Spring AI가 자동으로 Tool을 호출하고 결과를 LLM에 전달하므로,
+		// Tool 실행 요청 체크가 필요 없습니다. Spring AI가 내부에서 모든 Tool 실행을 처리합니다.
+		// 따라서 Tool 실행 요청 체크 로직을 제거하고, 바로 응답 완료 또는 에러만 체크합니다.
 		
 		// 에러가 있는 경우
 		if (state.getError() != null && !state.getError().isEmpty()) {
@@ -47,6 +53,7 @@ public class ConditionalNode {
 		}
 		
 		// 정상 응답 완료
+		// Spring AI가 Tool을 자동으로 호출하고 최종 응답을 생성했으므로, 바로 응답 완료로 처리합니다.
 		log.debug("ConditionalNode: 응답 완료, ResponseNode로 이동");
 		return "response";
 	}
