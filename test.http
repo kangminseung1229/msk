@@ -201,3 +201,55 @@ content-type: application/json
 ### signature test
 GET http://localhost:8080/api/gemini/generate?prompt=What+is+the+capital+of+France?&includeThoughts=true
 Content-Type: application/json
+
+### ============================================
+### Agent Streaming (SSE) - GET 요청
+### ============================================
+
+### Agent Stream - GET 요청 (계산)
+# SSE는 브라우저나 curl로 테스트해야 합니다.
+# curl 명령어: curl -N "http://localhost:8080/api/test/agent/stream?message=123+%2B+456을+계산해줘&sessionId=test-stream-1"
+GET http://localhost:8080/api/test/agent/stream?message=123+%2B+456을+계산해줘&sessionId=test-stream-1
+
+### Agent Stream - GET 요청 (간단한 질문)
+# curl 명령어: curl -N "http://localhost:8080/api/test/agent/stream?message=안녕하세요"
+GET http://localhost:8080/api/test/agent/stream?message=안녕하세요
+
+### ============================================
+### Agent Streaming (SSE) - POST 요청
+### ============================================
+
+### Agent Stream - POST 요청 (계산)
+# curl 명령어: curl -N -X POST http://localhost:8080/api/test/agent/stream -H "Content-Type: application/json" -d '{"message":"123 + 456을 계산해줘","sessionId":"test-stream-2"}'
+POST http://localhost:8080/api/test/agent/stream
+Content-Type: application/json
+
+{
+  "message": "123 + 456을 계산해줘",
+  "sessionId": "test-stream-2"
+}
+
+### Agent Stream - POST 요청 (날씨)
+# curl 명령어: curl -N -X POST http://localhost:8080/api/test/agent/stream -H "Content-Type: application/json" -d '{"message":"서울 날씨 알려줘","sessionId":"test-stream-3"}'
+POST http://localhost:8080/api/test/agent/stream
+Content-Type: application/json
+
+{
+  "message": "서울 날씨 알려줘",
+  "sessionId": "test-stream-3"
+}
+
+### ============================================
+### SSE 테스트 방법
+### ============================================
+###
+### 1. curl로 테스트 (터미널):
+###    curl -N "http://localhost:8080/api/test/agent/stream?message=안녕하세요"
+###
+### 2. 브라우저 JavaScript:
+###    const eventSource = new EventSource('http://localhost:8080/api/test/agent/stream?message=안녕하세요');
+###    eventSource.addEventListener('chunk', (e) => console.log('청크:', e.data));
+###    eventSource.addEventListener('complete', (e) => { console.log('완료:', e.data); eventSource.close(); });
+###
+### 3. IntelliJ HTTP Client는 SSE를 직접 지원하지 않으므로 curl 명령어를 사용하세요.
+###

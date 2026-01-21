@@ -82,6 +82,11 @@ public class AgentState {
 	private Map<String, Object> metadata = new HashMap<>();
 
 	/**
+	 * System Instruction (모델의 역할과 동작 방식을 정의)
+	 */
+	private String systemInstruction;
+
+	/**
 	 * 반복 횟수 증가
 	 */
 	public void incrementIterationCount() {

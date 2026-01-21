@@ -135,12 +135,15 @@ public class AiConfig {
 	/**
 	 * ChatClient Bean 생성
 	 * LangGraph4j에서 사용할 ChatClient를 제공합니다.
+	 * 
+	 * 참고: Agent에서는 LlmNode에서 SystemMessage를 직접 관리하므로,
+	 * ChatClient의 defaultSystem은 사용되지 않습니다.
 	 */
 	@Bean
 	@ConditionalOnBean(ChatModel.class)
 	public ChatClient chatClient(ChatModel chatModel) {
 		return ChatClient.builder(chatModel)
-				.defaultSystem("You are a helpful AI assistant.")
+				.defaultSystem("당신은 친절하고 도움이 되는 AI 어시스턴트입니다.")
 				.build();
 	}
 }

@@ -27,6 +27,11 @@ public class AgentRequest {
 	private String sessionId;
 
 	/**
+	 * System Instruction (선택사항, 모델의 역할과 동작 방식을 정의)
+	 */
+	private String systemInstruction;
+
+	/**
 	 * 추가 옵션
 	 */
 	private AgentOptions options;

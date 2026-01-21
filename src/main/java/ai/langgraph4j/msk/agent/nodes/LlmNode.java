@@ -1,21 +1,26 @@
 package ai.langgraph4j.msk.agent.nodes;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.chat.model.StreamingChatModel;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.retry.NonTransientAiException;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import ai.langgraph4j.msk.agent.state.AgentState;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.data.message.AiMessage;
 import lombok.extern.slf4j.Slf4j;
+import reactor.core.publisher.Flux;
 
 /**
  * LLM 호출 노드
@@ -139,6 +144,16 @@ public class LlmNode {
 	private List<Message> prepareMessages(AgentState state) {
 		List<Message> messages = new ArrayList<>();
 
+		// System Instruction이 있으면 먼저 추가
+		if (state.getSystemInstruction() != null && !state.getSystemInstruction().trim().isEmpty()) {
+			messages.add(new org.springframework.ai.chat.messages.SystemMessage(
+					state.getSystemInstruction()));
+		} else {
+			// System Instruction이 없으면 한국어 기본 메시지 추가
+			messages.add(new org.springframework.ai.chat.messages.SystemMessage(
+					"당신은 친절하고 도움이 되는 AI 어시스턴트입니다. 사용자의 질문에 정확하고 유용한 답변을 한국어로 제공하세요."));
+		}
+
 		// 사용자 메시지가 있으면 추가
 		if (state.getUserMessage() != null) {
 			messages.add(new org.springframework.ai.chat.messages.UserMessage(
@@ -156,6 +171,162 @@ public class LlmNode {
 		// Spring AI 내부에서 관리됩니다.
 
 		return messages;
+	}
+
+	/**
+	 * Phase 3: 스트리밍 모드로 LLM 호출
+	 * StreamingChatModel을 사용하여 실시간으로 응답을 생성하고 SSE로 전송합니다.
+	 * 
+	 * @param state 현재 상태
+	 * @param emitter SSE emitter (스트리밍 응답 전송용)
+	 * @return 업데이트된 상태
+	 */
+	public AgentState processStreaming(AgentState state, SseEmitter emitter) {
+		log.debug("LlmNode: 스트리밍 모드로 LLM 호출 시작, 현재 반복 횟수: {}", state.getIterationCount());
+
+		// LLM 호출 횟수 제한 체크
+		if (state.getIterationCount() >= maxIterations) {
+			log.warn("LlmNode: 최대 LLM 호출 횟수 초과 ({}), LLM 호출을 건너뜁니다", maxIterations);
+			state.setError("최대 LLM 호출 횟수(" + maxIterations + "회)를 초과했습니다. 요청이 너무 복잡합니다.");
+			state.setCurrentStep("error");
+			try {
+				emitter.send(SseEmitter.event()
+						.name("error")
+						.data("최대 LLM 호출 횟수를 초과했습니다."));
+			} catch (IOException e) {
+				log.error("LlmNode: 에러 이벤트 전송 실패", e);
+			}
+			return state;
+		}
+
+		try {
+			// 반복 횟수 증가 (LLM 호출 전에 증가)
+			state.incrementIterationCount();
+
+			// 대화 히스토리 준비
+			List<Message> messages = prepareMessages(state);
+
+			// StreamingChatModel 지원 확인
+			if (chatModel instanceof StreamingChatModel) {
+				@SuppressWarnings("unchecked")
+				StreamingChatModel streamingChatModel = (StreamingChatModel) chatModel;
+				Prompt prompt = new Prompt(messages);
+
+				// 스트리밍 응답 수집
+				AtomicReference<StringBuilder> fullResponse = new AtomicReference<>(new StringBuilder());
+				AtomicReference<ChatResponse> lastResponse = new AtomicReference<>();
+
+				Flux<ChatResponse> responseFlux = streamingChatModel.stream(prompt);
+
+				// 스트리밍 응답 처리
+				responseFlux
+						.doOnNext(chatResponse -> {
+							try {
+								String content = chatResponse.getResult().getOutput().getText();
+								if (content != null && !content.isEmpty()) {
+									// 전체 응답 누적
+									fullResponse.get().append(content);
+									lastResponse.set(chatResponse);
+
+									// SSE로 청크 전송
+									emitter.send(SseEmitter.event()
+											.name("chunk")
+											.data(content));
+								}
+							} catch (IOException e) {
+								log.error("LlmNode: 스트리밍 청크 전송 중 오류", e);
+							}
+						})
+						.doOnError(error -> {
+							log.error("LlmNode: 스트리밍 중 오류 발생", error);
+							try {
+								emitter.send(SseEmitter.event()
+										.name("error")
+										.data("LLM 스트리밍 중 오류: " + error.getMessage()));
+							} catch (IOException e) {
+								log.error("LlmNode: 에러 이벤트 전송 실패", e);
+							}
+						})
+						.doOnComplete(() -> log.debug("LlmNode: 스트리밍 완료"))
+						.blockLast(); // 스트리밍 완료까지 대기
+
+				// 최종 응답 설정
+				String finalContent = fullResponse.get().toString();
+				AiMessage aiMessage = new AiMessage(finalContent);
+
+				// 상태 업데이트
+				state.setAiMessage(aiMessage);
+				state.setToolExecutionRequests(new ArrayList<>());
+				state.getMessages().add(aiMessage);
+				state.setCurrentStep("llm");
+
+				log.debug("LlmNode: 스트리밍 LLM 호출 완료, 반복 횟수: {}, 응답 길이: {}자",
+						state.getIterationCount(), finalContent.length());
+
+			} else {
+				// 스트리밍 미지원 - 일반 호출 사용
+				log.warn("LlmNode: ChatModel이 StreamingChatModel을 구현하지 않음. 일반 호출 사용");
+				emitter.send(SseEmitter.event()
+						.name("info")
+						.data("스트리밍을 지원하지 않아 일반 모드로 실행합니다."));
+
+				// 일반 process 메서드 호출
+				state = process(state);
+			}
+
+			return state;
+
+		} catch (NonTransientAiException e) {
+			log.error("LlmNode: LLM 호출 실패 (NonTransient)", e);
+
+			String errorMessage = e.getMessage();
+			if (errorMessage != null && (errorMessage.contains("quota") ||
+					errorMessage.contains("insufficient_quota") ||
+					errorMessage.contains("429") ||
+					errorMessage.contains("exceeded"))) {
+				String errorMsg = "Gemini API 할당량이 초과되었습니다. API 키의 사용량을 확인하거나 결제 정보를 확인해주세요.";
+				log.error("LlmNode: Gemini API 할당량 초과 - {}", errorMessage);
+				state.setError(errorMsg);
+			} else {
+				state.setError("LLM 호출 중 오류 발생: " + errorMessage);
+			}
+			state.setException(e);
+			state.setCurrentStep("error");
+
+			try {
+				emitter.send(SseEmitter.event()
+						.name("error")
+						.data(state.getError()));
+			} catch (IOException ioException) {
+				log.error("LlmNode: 에러 이벤트 전송 실패", ioException);
+			}
+
+			return state;
+		} catch (Exception e) {
+			log.error("LlmNode: LLM 호출 실패", e);
+
+			String errorMessage = e.getMessage();
+			if (errorMessage != null && (errorMessage.contains("quota") ||
+					errorMessage.contains("insufficient_quota") ||
+					errorMessage.contains("429") ||
+					errorMessage.contains("exceeded"))) {
+				state.setError("Gemini API 할당량이 초과되었습니다. API 키의 사용량을 확인하거나 결제 정보를 확인해주세요.");
+			} else {
+				state.setError("LLM 호출 중 오류 발생: " + errorMessage);
+			}
+			state.setException(e);
+			state.setCurrentStep("error");
+
+			try {
+				emitter.send(SseEmitter.event()
+						.name("error")
+						.data(state.getError()));
+			} catch (IOException ioException) {
+				log.error("LlmNode: 에러 이벤트 전송 실패", ioException);
+			}
+
+			return state;
+		}
 	}
 
 	/**
