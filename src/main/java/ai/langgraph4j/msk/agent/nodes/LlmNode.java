@@ -21,6 +21,10 @@ import lombok.extern.slf4j.Slf4j;
  * LLM 호출 노드
  * Spring AI ChatModel을 사용하여 LLM을 호출하고 응답을 생성합니다.
  * 
+ * Phase 3: Spring AI Tool 자동 호출을 활용합니다.
+ * Spring AI가 자동으로 Tool을 호출하고 결과를 LLM에 전달하므로,
+ * 수동 Tool 파싱 로직이 필요 없습니다.
+ * 
  * AgentGraph에서 사용되며, Gemini API를 통해 LLM 응답을 생성합니다.
  * 
  * @Qualifier("chatModel")을 사용하여 AiConfig에서 생성한 chatModel Bean을 명시적으로 지정합니다.
@@ -62,28 +66,21 @@ public class LlmNode {
 			// 대화 히스토리 준비
 			List<Message> messages = prepareMessages(state);
 
-			// LLM 호출
+			// Phase 3: Spring AI Tool 자동 호출
+			// ChatModel에 Tool이 이미 통합되어 있으므로, Spring AI가 자동으로 Tool을 호출합니다.
+			// Tool 호출이 필요한 경우 Spring AI가 자동으로 처리하고 결과를 LLM에 전달합니다.
 			Prompt prompt = new Prompt(messages);
 			ChatResponse response = chatModel.call(prompt);
 
 			// 응답 추출
+			// Spring AI가 Tool을 자동으로 호출했을 수 있으므로, 최종 응답을 확인합니다.
 			String content = response.getResult().getOutput().getText();
 			AiMessage aiMessage = new AiMessage(content);
 
-			// 도구 실행 요청 추출
-			// 주의: Tool 실행 결과가 이미 있으면 (Tool 실행 후 재호출),
-			// LLM이 최종 응답을 생성하는 것이므로 Tool 요청을 생성하지 않음
+			// Phase 3: Spring AI가 자동으로 Tool을 호출하므로 수동 Tool 파싱이 필요 없습니다.
+			// Tool 호출이 필요한 경우 Spring AI가 자동으로 처리하고 결과를 LLM에 전달합니다.
+			// 따라서 Tool 요청 추출 로직을 제거하고, Spring AI의 자동 Tool 호출을 활용합니다.
 			List<ToolExecutionRequest> toolRequests = new ArrayList<>();
-			boolean hasToolResults = state.getToolExecutionResults() != null &&
-					!state.getToolExecutionResults().isEmpty();
-
-			if (!hasToolResults) {
-				// Tool 실행 결과가 없을 때만 Tool 요청 추출 (사용자 원본 요청에서만)
-				toolRequests = extractToolRequests(aiMessage);
-				log.debug("LlmNode: Tool 요청 추출 - {}개", toolRequests.size());
-			} else {
-				log.debug("LlmNode: Tool 실행 결과가 있으므로 Tool 요청 추출 건너뜀 (최종 응답 생성 단계)");
-			}
 
 			// 상태 업데이트
 			state.setAiMessage(aiMessage);
@@ -140,7 +137,7 @@ public class LlmNode {
 		// 사용자 메시지가 있으면 추가
 		if (state.getUserMessage() != null) {
 			messages.add(new org.springframework.ai.chat.messages.UserMessage(
-					state.getUserMessage().text()));
+					state.getUserMessage().singleText()));
 		}
 
 		// 도구 실행 결과가 있으면 추가
@@ -157,86 +154,10 @@ public class LlmNode {
 	}
 
 	/**
-	 * AI 메시지에서 도구 실행 요청 추출
+	 * Phase 3: Spring AI Tool 자동 호출
 	 * 
-	 * Phase 2에서는 간단한 텍스트 파싱 방식으로 구현합니다.
-	 * Phase 3에서 Spring AI Tool 통합으로 개선 예정입니다.
-	 * 
-	 * 현재는 계산 요청을 감지하여 CalculatorTool 호출 요청을 생성합니다.
+	 * Phase 2의 수동 Tool 파싱 로직은 제거되었습니다.
+	 * Spring AI가 자동으로 Tool을 호출하고 결과를 LLM에 전달하므로,
+	 * 수동 Tool 파싱이 필요 없습니다.
 	 */
-	private List<ToolExecutionRequest> extractToolRequests(AiMessage aiMessage) {
-		List<ToolExecutionRequest> toolRequests = new ArrayList<>();
-
-		if (aiMessage == null || aiMessage.text() == null) {
-			return toolRequests;
-		}
-
-		String text = aiMessage.text().toLowerCase();
-
-		// 계산 요청 감지 패턴
-		// 예: "123 + 456", "계산해줘", "10 * 5는?", "100을 4로 나눈 값" 등
-		if (containsCalculationRequest(text)) {
-			// 계산 표현식 추출 시도
-			String expression = extractCalculationExpression(aiMessage.text());
-			if (expression != null && !expression.isEmpty()) {
-				ToolExecutionRequest request = ToolExecutionRequest.builder()
-						.name("calculator")
-						.arguments(expression)
-						.build();
-				toolRequests.add(request);
-				log.debug("LlmNode: 계산 요청 감지 - {}", expression);
-			}
-		}
-
-		return toolRequests;
-	}
-
-	/**
-	 * 텍스트에 계산 요청이 포함되어 있는지 확인
-	 */
-	private boolean containsCalculationRequest(String text) {
-		// 계산 관련 키워드
-		String[] calculationKeywords = {
-				"계산", "더하기", "빼기", "곱하기", "나누기",
-				"calculate", "compute", "add", "subtract", "multiply", "divide",
-				"+", "-", "*", "/", "×", "÷"
-		};
-
-		for (String keyword : calculationKeywords) {
-			if (text.contains(keyword)) {
-				return true;
-			}
-		}
-
-		// 숫자와 연산자 패턴 (예: "123 + 456", "10*5")
-		if (text.matches(".*\\d+\\s*[+\\-*/×÷]\\s*\\d+.*")) {
-			return true;
-		}
-
-		return false;
-	}
-
-	/**
-	 * 텍스트에서 계산 표현식 추출
-	 * 예: "123 + 456을 계산해줘" -> "123 + 456"
-	 */
-	private String extractCalculationExpression(String text) {
-		// 숫자와 연산자 패턴 매칭
-		java.util.regex.Pattern pattern = java.util.regex.Pattern.compile(
-				"(\\d+(?:\\.\\d+)?)\\s*([+\\-*/×÷])\\s*(\\d+(?:\\.\\d+)?)");
-		java.util.regex.Matcher matcher = pattern.matcher(text);
-
-		if (matcher.find()) {
-			String operand1 = matcher.group(1);
-			String operator = matcher.group(2);
-			String operand2 = matcher.group(3);
-
-			// 연산자 변환 (× -> *, ÷ -> /)
-			operator = operator.replace("×", "*").replace("÷", "/");
-
-			return operand1 + " " + operator + " " + operand2;
-		}
-
-		return null;
-	}
 }

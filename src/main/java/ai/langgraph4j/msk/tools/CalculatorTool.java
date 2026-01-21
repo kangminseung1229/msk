@@ -3,6 +3,8 @@ package ai.langgraph4j.msk.tools;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 
+import org.springframework.ai.tool.annotation.Tool;
+import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.stereotype.Component;
 
 import com.ezylang.evalex.EvaluationException;
@@ -37,7 +39,9 @@ public class CalculatorTool {
 	 * @param expression 수학 표현식 (예: "123 + 456", "10 * 5", "(1 + 2) * 3", "sqrt(16)")
 	 * @return 계산 결과 (문자열)
 	 */
-	public String calculate(String expression) {
+	@Tool(description = "수학 표현식을 계산합니다. 기본 사칙연산, 괄호, 수학 함수(sin, cos, sqrt, log, pow 등)를 지원합니다.")
+	public String calculate(
+			@ToolParam(description = "계산할 수학 표현식 (예: '123 + 456', '10 * 5', '(1 + 2) * 3', 'sqrt(16)')") String expression) {
 		if (expression == null || expression.trim().isEmpty()) {
 			return "오류: 계산할 표현식이 비어있습니다.";
 		}

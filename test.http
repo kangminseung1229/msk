@@ -117,6 +117,78 @@ Content-Type: application/json
   "message": "인공지능이 무엇인지 간단히 설명해주세요"
 }
 
+### Agent Invoke - 검색 요청 (한국어)
+POST http://localhost:8080/api/test/agent/invoke
+Content-Type: application/json
+
+{
+  "message": "인공지능 검색해줘",
+  "sessionId": "test-session-5"
+}
+
+### Agent Invoke - 검색 요청 (영어)
+POST http://localhost:8080/api/test/agent/invoke
+Content-Type: application/json
+
+{
+  "message": "search for artificial intelligence",
+  "sessionId": "test-session-6"
+}
+
+### Agent Invoke - 검색 요청 (찾아줘)
+POST http://localhost:8080/api/test/agent/invoke
+Content-Type: application/json
+
+{
+  "message": "스프링 부트 정보 찾아줘",
+  "sessionId": "test-session-7"
+}
+
+### Agent Invoke - 검색과 계산 혼합 (검색 우선)
+POST http://localhost:8080/api/test/agent/invoke
+Content-Type: application/json
+
+{
+  "message": "Java 프로그래밍 언어 검색해줘",
+  "sessionId": "test-session-8"
+}
+
+### Agent Invoke - 날씨 요청 (한국어 - 도시명 포함)
+POST http://localhost:8080/api/test/agent/invoke
+Content-Type: application/json
+
+{
+  "message": "서울 날씨 알려줘",
+  "sessionId": "test-session-9"
+}
+
+### Agent Invoke - 날씨 요청 (영어)
+POST http://localhost:8080/api/test/agent/invoke
+Content-Type: application/json
+
+{
+  "message": "weather in Seoul",
+  "sessionId": "test-session-10"
+}
+
+### Agent Invoke - 날씨 요청 (간단한 질문)
+POST http://localhost:8080/api/test/agent/invoke
+Content-Type: application/json
+
+{
+  "message": "오늘 날씨는?",
+  "sessionId": "test-session-11"
+}
+
+### Agent Invoke - 날씨 요청 (부산)
+POST http://localhost:8080/api/test/agent/invoke
+Content-Type: application/json
+
+{
+  "message": "부산 날씨 알려주세요",
+  "sessionId": "test-session-12"
+}
+
 ### Agent Health Check
 POST http://localhost:8080/api/test/agent/invoke
 content-type: application/json
