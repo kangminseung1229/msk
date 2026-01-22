@@ -134,17 +134,17 @@ public class GeminiTextController {
 
 	/**
 	 * SSE를 사용한 스트리밍 응답 엔드포인트
+	 * POST 요청으로 RequestBody를 받아 긴 파라미터도 처리 가능
 	 * 
-	 * @param systemInstruction System Instruction
-	 * @param userPrompt        User Prompt
-	 * @param model             모델명
+	 * @param request System Instruction, User Prompt, Model을 포함한 요청
 	 * @return SseEmitter
 	 */
-	@GetMapping(value = "/streaming-sse", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-	public SseEmitter streamingSse(
-			@RequestParam(name = "systemInstruction", required = false) String systemInstruction,
-			@RequestParam(name = "userPrompt") String userPrompt,
-			@RequestParam(name = "model", required = false) String model) {
+	@PostMapping(value = "/streaming-sse", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+	public SseEmitter streamingSse(@RequestBody SystemInstructionRequest request) {
+		String systemInstruction = request.getSystemInstruction();
+		String userPrompt = request.getUserPrompt();
+		String model = request.getModel();
+
 		log.info("스트리밍 요청 - systemInstruction: {}, userPrompt: {}, model: {}",
 				systemInstruction, userPrompt, model);
 		return geminiTextService.streamingSse(systemInstruction, userPrompt, model);

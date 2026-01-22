@@ -18,7 +18,7 @@
             min-height: 100vh;
             display: flex;
             justify-content: center;
-            align-items: center;
+            align-items: flex-start;
             padding: 20px;
         }
 
@@ -29,6 +29,7 @@
             width: 100%;
             max-width: 900px;
             padding: 40px;
+            margin-top: 20px;
         }
 
         h1 {
@@ -102,8 +103,9 @@
             border-radius: 8px;
             border: 2px solid #e0e0e0;
             min-height: 200px;
-            max-height: 500px;
+            max-height: calc(100vh - 400px);
             overflow-y: auto;
+            transition: max-height 0.3s ease;
         }
 
         .response-content {
@@ -169,7 +171,7 @@
 
 <body>
     <div class="container">
-        <h1>🤖 Gemini 벡터 검색 스트리밍 테스트</h1>
+        <h1>🤖 택스넷 AI 상담 Agent (텍스넷 데이터 기반) </h1>
 
         <form id="streamingForm">
             <div class="form-group">
@@ -200,7 +202,7 @@
         const responseContainer = document.getElementById('responseContainer');
         const responseContent = document.getElementById('responseContent');
         const status = document.getElementById('status');
-        let eventSource = null;
+        let abortController = null;
 
         form.addEventListener('submit', function (e) {
             e.preventDefault();
@@ -214,8 +216,8 @@
             }
 
             // 기존 연결 종료
-            if (eventSource) {
-                eventSource.close();
+            if (abortController) {
+                abortController.abort();
             }
 
             // UI 초기화
@@ -227,56 +229,121 @@
             status.textContent = '연결 중...';
 
             // SSE URL 구성 (Gemini 엔드포인트)
-            let url = '/api/gemini/streaming-sse?userPrompt=' + encodeURIComponent(message);
-            if (systemInstruction && systemInstruction.trim()) {
-                url += '&systemInstruction=' + encodeURIComponent(systemInstruction.trim());
-            }
+            // 프록시 경로를 포함하여 절대 경로로 구성
+            // 현재 페이지 경로에서 base path 추출
+            // 예: /counsel-ai/api/gemini/streaming-page -> /counsel-ai/api/gemini/streaming-sse
+            // 예: /api/gemini/streaming-page -> /api/gemini/streaming-sse
+            const currentPath = window.location.pathname;
+            // streaming-page를 streaming-sse로 교체
+            const ssePath = currentPath.replace('/streaming-page', '/streaming-sse');
 
-            // EventSource로 SSE 연결
-            eventSource = new EventSource(url);
+            // 디버깅: 프록시 경로 포함 여부 확인
+            console.log('현재 페이지 경로:', currentPath);
+            console.log('SSE 연결 URL:', ssePath);
+            console.log('프록시 경로 포함:', currentPath.includes('/counsel-ai/'));
 
-            // LLM 응답 메시지 이벤트 (Gemini 스트리밍)
-            eventSource.addEventListener('message', function (event) {
-                const data = event.data;
-                responseContent.textContent += data;
-                status.className = 'status streaming';
-                status.textContent = '스트리밍 중...';
+            // POST 요청으로 SSE 연결 (fetch API 사용)
+            abortController = new AbortController();
 
-                // 자동 스크롤
-                responseContainer.scrollTop = responseContainer.scrollHeight;
-            });
-
-            // 완료 이벤트
-            eventSource.addEventListener('complete', function (event) {
-                status.className = 'status complete';
-                status.textContent = '스트리밍 완료: ' + event.data;
-                submitBtn.disabled = false;
-                eventSource.close();
-                eventSource = null;
-            });
-
-            // 에러 이벤트
-            eventSource.addEventListener('error', function (event) {
-                console.error('스트리밍 오류:', event);
-                status.className = 'status error';
-                status.textContent = '연결 오류가 발생했습니다.';
-                submitBtn.disabled = false;
-                if (eventSource) {
-                    eventSource.close();
-                    eventSource = null;
-                }
-            });
-
-            eventSource.onerror = function (error) {
-                console.error('SSE 연결 오류:', error);
-                status.className = 'status error';
-                status.textContent = '연결 오류가 발생했습니다.';
-                submitBtn.disabled = false;
-                if (eventSource) {
-                    eventSource.close();
-                    eventSource = null;
-                }
+            const requestBody = {
+                userPrompt: message,
+                systemInstruction: systemInstruction && systemInstruction.trim() ? systemInstruction.trim() : null,
+                model: null // 기본값 사용
             };
+
+            fetch(ssePath, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(requestBody),
+                signal: abortController.signal
+            })
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    return response.body;
+                })
+                .then(body => {
+                    const reader = body.getReader();
+                    const decoder = new TextDecoder();
+                    let buffer = '';
+
+                    function readStream() {
+                        reader.read().then(({ done, value }) => {
+                            if (done) {
+                                status.className = 'status complete';
+                                status.textContent = '스트리밍 완료';
+                                submitBtn.disabled = false;
+                                abortController = null;
+                                return;
+                            }
+
+                            // 디코딩된 청크를 버퍼에 추가
+                            buffer += decoder.decode(value, { stream: true });
+
+                            // SSE 형식 파싱: 빈 줄로 구분된 이벤트 단위로 분리
+                            const events = buffer.split('\n\n');
+                            buffer = events.pop() || ''; // 마지막 불완전한 이벤트는 버퍼에 보관
+
+                            for (const event of events) {
+                                if (!event.trim()) continue;
+
+                                let eventType = 'message';
+                                let eventData = '';
+
+                                // 라인별로 파싱
+                                const lines = event.split('\n');
+                                for (const line of lines) {
+                                    if (line.startsWith('event:')) {
+                                        eventType = line.substring(6).trim();
+                                    } else if (line.startsWith('data:')) {
+                                        const data = line.substring(5);
+                                        // data: 뒤에 공백이 있을 수 있으므로 trim
+                                        eventData += (eventData ? '\n' : '') + data.trim();
+                                    }
+                                }
+
+                                // 이벤트 처리
+                                if (eventType === 'complete') {
+                                    status.className = 'status complete';
+                                    status.textContent = '스트리밍 완료: ' + (eventData || '');
+                                    submitBtn.disabled = false;
+                                    abortController = null;
+                                    return;
+                                } else if (eventType === 'message' && eventData) {
+                                    responseContent.textContent += eventData;
+                                    status.className = 'status streaming';
+                                    status.textContent = '스트리밍 중...';
+                                    responseContainer.scrollTop = responseContainer.scrollHeight;
+                                }
+                            }
+
+                            // 다음 청크 읽기
+                            readStream();
+                        }).catch(error => {
+                            if (error.name !== 'AbortError') {
+                                console.error('스트리밍 읽기 오류:', error);
+                                status.className = 'status error';
+                                status.textContent = '스트리밍 중 오류가 발생했습니다.';
+                                submitBtn.disabled = false;
+                                abortController = null;
+                            }
+                        });
+                    }
+
+                    readStream();
+                })
+                .catch(error => {
+                    if (error.name !== 'AbortError') {
+                        console.error('SSE 연결 오류:', error);
+                        status.className = 'status error';
+                        status.textContent = '연결 오류가 발생했습니다.';
+                        submitBtn.disabled = false;
+                        abortController = null;
+                    }
+                });
         });
     </script>
 </body>

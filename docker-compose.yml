@@ -1,0 +1,60 @@
+version: '3.8'
+
+services:
+  # PostgreSQL 데이터베이스
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: msk-postgres
+    environment:
+      POSTGRES_DB: consultation_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docs/VECTOR_TABLE_SETUP.sql:/docker-entrypoint-initdb.d/01-vector-setup.sql
+      - ./docs/QUERY_CHUNK_SIZE.sql:/docker-entrypoint-initdb.d/02-query-chunk-size.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Spring Boot 애플리케이션
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: msk-app
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # 데이터베이스 설정
+      DB_URL: jdbc:postgresql://postgres:5432/consultation_db
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      
+      # Google Gemini API 키 (환경 변수로 설정 필요)
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-your-api-key-here}
+      
+      # Spring Boot 설정
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-prod}
+      
+      # JVM 옵션
+      JAVA_OPTS: "-Xmx512m -Xms256m"
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./checkpoints:/app/checkpoints
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+volumes:
+  postgres_data:

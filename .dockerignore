@@ -1,0 +1,47 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Gradle
+.gradle
+build/
+gradle/wrapper/gradle-wrapper.jar
+
+# IDE
+.idea
+.vscode
+*.iml
+*.ipr
+*.iws
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.sts4-cache
+bin/
+out/
+nbproject/
+nbbuild/
+dist/
+nbdist/
+.nb-gradle/
+
+# Documentation
+*.md
+docs/
+
+# Test files
+test.http
+datasample/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Checkpoints (런타임 생성)
+checkpoints/

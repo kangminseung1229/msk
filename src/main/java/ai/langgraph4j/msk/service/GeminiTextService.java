@@ -305,7 +305,15 @@ public class GeminiTextService {
 
 					responseFlux.doOnError(error -> {
 						log.error("스트리밍 중 오류 발생", error);
-						emitter.completeWithError(error);
+						try {
+							emitter.send(SseEmitter.event()
+									.name("error")
+									.data("스트리밍 중 오류가 발생했습니다: " + error.getMessage()));
+							emitter.completeWithError(error);
+						} catch (IOException e) {
+							log.error("에러 이벤트 전송 중 오류", e);
+							emitter.completeWithError(error);
+						}
 					})
 							.doOnComplete(() -> {
 								try {
@@ -319,18 +327,31 @@ public class GeminiTextService {
 								}
 							})
 							.subscribe(chatResponse -> {
-								String content = chatResponse.getResult().getOutput().getText();
-								if (content == null || content.isEmpty()) {
-									return;
-								}
-
 								try {
+									if (chatResponse == null || chatResponse.getResult() == null
+											|| chatResponse.getResult().getOutput() == null) {
+										log.warn("스트리밍 응답에 필수 필드가 없습니다: {}", chatResponse);
+										return;
+									}
+
+									String content = chatResponse.getResult().getOutput().getText();
+									if (content == null || content.isEmpty()) {
+										return;
+									}
+
 									emitter.send(SseEmitter.event()
 											.name("message")
 											.data(content));
-								} catch (IOException e) {
-									log.error("스트리밍 메시지 전송 중 오류", e);
-									emitter.completeWithError(e);
+								} catch (Exception e) {
+									log.error("스트리밍 응답 처리 중 오류 발생 (계속 진행)", e);
+									// JSON 파싱 에러 등이 발생해도 스트리밍은 계속 진행
+									try {
+										emitter.send(SseEmitter.event()
+												.name("error")
+												.data("응답 처리 중 오류: " + e.getMessage()));
+									} catch (IOException ioException) {
+										log.error("에러 이벤트 전송 중 오류", ioException);
+									}
 								}
 							});
 				} else {
