@@ -43,12 +43,25 @@ dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-validation'
 	implementation 'org.springframework.boot:spring-boot-starter-thymeleaf'
 	
+	// Spring Data JPA
+	implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+	
+	// PostgreSQL Driver
+	runtimeOnly 'org.postgresql:postgresql'
+	
 	// Spring AI - Google GenAI (Gemini with API key support)
 	implementation 'org.springframework.ai:spring-ai-starter-model-google-genai'
 	// Google GenAI SDK - 최신 버전으로 업데이트 (thinkingLevel 지원)
 	implementation 'com.google.genai:google-genai:1.35.0'
 	// Spring AI Chat Client (ChatClient 사용을 위해 필요)
 	implementation 'org.springframework.ai:spring-ai-client-chat'
+	
+	// Spring AI Vector Store - PostgreSQL pgvector
+	implementation 'org.springframework.ai:spring-ai-pgvector-store'
+	
+	// Spring AI Embedding (Gemini Embedding 사용)
+	implementation 'org.springframework.ai:spring-ai-starter-model-google-genai-embedding'
+	
 	// Ollama 사용 시 주석 해제하고 Google GenAI 주석 처리
 	// implementation 'org.springframework.ai:spring-ai-ollama'
 	
@@ -63,6 +76,9 @@ dependencies {
 	
 	// EvalEx - 수학 표현식 평가 라이브러리 (계산기 및 세금 계산용)
 	implementation 'com.ezylang:EvalEx:3.6.0'
+	
+	// JSoup - HTML 파싱 및 정리 (상담 데이터의 HTML 태그 제거용)
+	implementation 'org.jsoup:jsoup:1.17.2'
 	
 	// Lombok
 	compileOnly 'org.projectlombok:lombok'

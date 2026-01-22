@@ -253,3 +253,7 @@ Content-Type: application/json
 ###
 ### 3. IntelliJ HTTP Client는 SSE를 직접 지원하지 않으므로 curl 명령어를 사용하세요.
 ###
+
+### 임베딩
+POST http://localhost:8080/api/embedding/all
+Content-Type: application/json
