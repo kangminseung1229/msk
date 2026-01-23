@@ -5,10 +5,12 @@ import java.util.List;
 
 import org.springframework.ai.document.Document;
 import org.springframework.ai.vectorstore.VectorStore;
+import org.springframework.context.ApplicationContext;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import ai.langgraph4j.aiagent.entity.law.Article;
@@ -31,19 +33,28 @@ public class LawArticleEmbeddingService {
 	private final LawBasicInformationRepository lawBasicInformationRepository;
 	private final ArticleRepository articleRepository;
 	private final VectorStore vectorStore;
+	private final ApplicationContext applicationContext;
+
+	/**
+	 * 자기 자신의 프록시를 가져와서 트랜잭션이 적용된 메서드를 호출
+	 */
+	private LawArticleEmbeddingService getSelf() {
+		return applicationContext.getBean(LawArticleEmbeddingService.class);
+	}
 
 	/**
 	 * 모든 lawId별 최신 법령의 조문들을 임베딩하여 Vector Store에 저장
 	 * 페이징 처리로 메모리 사용량을 최적화하고, 각 법령 처리 후 즉시 flush합니다.
+	 * 각 법령 처리는 독립적인 트랜잭션으로 실행되어, 하나의 법령에서 오류가 발생해도
+	 * 다른 법령 처리는 계속 진행됩니다.
 	 * 
 	 * @return 처리된 문서 수 (청크 포함)
 	 */
-	@Transactional(readOnly = true)
 	public int embedAllLatestLawArticles() {
 		log.info("전체 최신 법령 조문 임베딩 시작 (페이징 처리 모드)");
 
-		// 전체 법령 수 조회
-		long totalCount = lawBasicInformationRepository.countAllLatestByLawId();
+		// 전체 법령 수 조회 (별도 트랜잭션)
+		long totalCount = getSelf().countAllLatestLawArticles();
 		log.info("전체 최신 법령 수: {}", totalCount);
 
 		if (totalCount == 0) {
@@ -59,39 +70,32 @@ public class LawArticleEmbeddingService {
 
 		// 페이지네이션을 사용한 배치 처리
 		while (true) {
-			Pageable pageable = PageRequest.of(page, batchSize);
-			Page<LawBasicInformation> pageResult = lawBasicInformationRepository.findAllLatestByLawId(pageable);
+			// 각 페이지 조회는 별도 트랜잭션으로 실행
+			Page<LawBasicInformation> pageResult = getSelf().findAllLatestByLawIdPage(page, batchSize);
 
 			if (pageResult.isEmpty()) {
 				break;
 			}
 
 			List<LawBasicInformation> batch = pageResult.getContent();
-			log.info("배치 처리 진행 중: {}/{} ({}%)", 
+			log.info("배치 처리 진행 중: {}/{} ({}%)",
 					page * batchSize + batch.size(), totalCount,
 					totalCount > 0 ? (int) ((page * batchSize + batch.size()) * 100.0 / totalCount) : 0);
 
-			// 각 법령을 처리하고 즉시 flush
+			// 각 법령을 처리하고 즉시 flush (각 법령마다 독립적인 트랜잭션)
 			for (LawBasicInformation law : batch) {
 				try {
-					// 조문 목록 조회 (삭제되지 않은 조문만)
-					List<Article> articles = articleRepository.findActiveArticlesByLawBasicInformationId(law.getId());
+					// 각 법령 처리를 독립적인 트랜잭션으로 실행
+					ProcessingResult result = getSelf().processLawArticleEmbedding(law);
+					totalProcessed += result.processed;
+					totalArticles += result.articles;
 
-					if (articles.isEmpty()) {
-						log.debug("법령 ID {} (lawId: {})에 조문이 없습니다", law.getId(), law.getLawId());
-						continue;
-					}
-
-					// 조문 임베딩 처리 (각 법령마다 즉시 flush)
-					int processed = embedArticlesForLaw(law, articles);
-					totalProcessed += processed;
-					totalArticles += articles.size();
-
-					log.debug("법령 ID {} (lawId: {}) 처리 완료: {}개 조문, {}개 문서 임베딩", 
-							law.getId(), law.getLawId(), articles.size(), processed);
+					log.debug("법령 ID {} (lawId: {}) 처리 완료: {}개 조문, {}개 문서 임베딩",
+							law.getId(), law.getLawId(), result.articles, result.processed);
 
 				} catch (Exception e) {
 					log.error("법령 ID {} (lawId: {}) 처리 중 오류 발생", law.getId(), law.getLawId(), e);
+					// 오류가 발생해도 다음 법령 처리는 계속 진행
 				}
 			}
 
@@ -108,18 +112,71 @@ public class LawArticleEmbeddingService {
 			}
 		}
 
-		log.info("전체 최신 법령 조문 임베딩 완료: 총 {}개 법령, {}개 조문, {}개 문서 임베딩", 
+		log.info("전체 최신 법령 조문 임베딩 완료: 총 {}개 법령, {}개 조문, {}개 문서 임베딩",
 				totalCount, totalArticles, totalProcessed);
 		return totalProcessed;
 	}
 
 	/**
+	 * 전체 최신 법령 수 조회 (읽기 전용 트랜잭션)
+	 */
+	@Transactional(readOnly = true)
+	public long countAllLatestLawArticles() {
+		return lawBasicInformationRepository.countAllLatestByLawId();
+	}
+
+	/**
+	 * 최신 법령 목록 페이징 조회 (읽기 전용 트랜잭션)
+	 */
+	@Transactional(readOnly = true)
+	public Page<LawBasicInformation> findAllLatestByLawIdPage(int page, int batchSize) {
+		Pageable pageable = PageRequest.of(page, batchSize);
+		return lawBasicInformationRepository.findAllLatestByLawId(pageable);
+	}
+
+	/**
+	 * 법령 처리 결과를 담는 내부 클래스
+	 */
+	private static class ProcessingResult {
+		final int processed;
+		final int articles;
+
+		ProcessingResult(int processed, int articles) {
+			this.processed = processed;
+			this.articles = articles;
+		}
+	}
+
+	/**
+	 * 개별 법령의 조문 임베딩 처리 (독립적인 트랜잭션)
+	 * REQUIRES_NEW를 사용하여 부모 트랜잭션과 독립적으로 실행되므로,
+	 * 오류가 발생해도 롤백되지 않고 다음 처리를 계속할 수 있습니다.
+	 * readOnly = false로 설정하여 Vector Store에 INSERT가 가능하도록 합니다.
+	 */
+	@Transactional(propagation = Propagation.REQUIRES_NEW)
+	public ProcessingResult processLawArticleEmbedding(LawBasicInformation law) {
+		// 조문 목록 조회 (삭제되지 않은 조문만)
+		List<Article> articles = articleRepository.findActiveArticlesByLawBasicInformationId(law.getId());
+
+		if (articles.isEmpty()) {
+			log.debug("법령 ID {} (lawId: {})에 조문이 없습니다", law.getId(), law.getLawId());
+			return new ProcessingResult(0, 0);
+		}
+
+		// 조문 임베딩 처리 (각 법령마다 즉시 flush)
+		int processed = embedArticlesForLaw(law, articles);
+
+		return new ProcessingResult(processed, articles.size());
+	}
+
+	/**
 	 * 특정 lawId의 최신 법령 조문들을 임베딩하여 Vector Store에 저장
+	 * readOnly = false로 설정하여 Vector Store에 INSERT가 가능하도록 합니다.
 	 * 
 	 * @param lawId 법령ID
 	 * @return 처리된 조문 수
 	 */
-	@Transactional(readOnly = true)
+	@Transactional
 	public int embedLatestLawArticlesByLawId(String lawId) {
 		log.info("법령 ID {}의 최신 조문 임베딩 시작", lawId);
 
@@ -138,7 +195,7 @@ public class LawArticleEmbeddingService {
 		// 3. 조문 임베딩 처리
 		int processed = embedArticlesForLaw(law, articles);
 
-		log.info("법령 ID {} (lawId: {}) 임베딩 완료: {}개 조문, {}개 문서 임베딩", 
+		log.info("법령 ID {} (lawId: {}) 임베딩 완료: {}개 조문, {}개 문서 임베딩",
 				law.getId(), lawId, articles.size(), processed);
 		return processed;
 	}
@@ -147,7 +204,7 @@ public class LawArticleEmbeddingService {
 	 * 특정 법령의 조문들을 임베딩하여 Vector Store에 저장
 	 * 각 조문을 처리할 때마다 즉시 flush하여 메모리 사용량을 최적화합니다.
 	 * 
-	 * @param law     법령 기본 정보
+	 * @param law      법령 기본 정보
 	 * @param articles 조문 목록
 	 * @return 처리된 문서 수 (청크 포함)
 	 */
@@ -158,7 +215,7 @@ public class LawArticleEmbeddingService {
 
 		for (Article article : articles) {
 			List<Document> documents = new ArrayList<>();
-			
+
 			try {
 				// 1. 텍스트 준비
 				String text = LawArticleMetadata.buildArticleText(law, article);
@@ -210,12 +267,11 @@ public class LawArticleEmbeddingService {
 			}
 		}
 
-		log.debug("법령 ID {} (lawId: {}) 처리 완료: 성공 {}건, 실패 {}건, 총 문서 {}개", 
+		log.debug("법령 ID {} (lawId: {}) 처리 완료: 성공 {}건, 실패 {}건, 총 문서 {}개",
 				law.getId(), law.getLawId(), successCount, failCount, totalDocuments);
 
 		return totalDocuments;
 	}
-
 
 	/**
 	 * 텍스트를 청크로 분할

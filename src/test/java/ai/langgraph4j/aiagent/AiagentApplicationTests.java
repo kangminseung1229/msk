@@ -23,6 +23,7 @@ import com.google.genai.Client;
  * Spring Boot 애플리케이션 컨텍스트 로딩 테스트
  * test 프로파일에서는 AiConfig와 ToolConfig가 @Profile("!test")로 인해 제외됩니다.
  * 테스트용 Mock ChatModel을 제공하여 Agent 관련 컴포넌트들이 정상적으로 로드되도록 합니다.
+ * application-test.properties에서 데이터베이스 자동 설정이 제외됩니다.
  */
 @SpringBootTest
 @ActiveProfiles("test")

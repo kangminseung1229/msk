@@ -70,6 +70,8 @@ public class Attachedform {
     private AmendmentType amendmentType; // 개정여부 (이번 공포호수에서 개정, 신설된것)
 
     private LocalDate amendmentAt; // 개정,신설,삭제 구분날짜
+
+    @Builder.Default
     private boolean amendment = false; // 개정여부 공포일 +1 시행일자와 같다면 true
 
     @ManyToOne
