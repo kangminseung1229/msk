@@ -16,6 +16,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import ai.langgraph4j.aiagent.entity.counsel.Counsel;
+import ai.langgraph4j.aiagent.entity.law.LawArticleCode;
 import ai.langgraph4j.aiagent.repository.CounselRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -220,8 +221,20 @@ public class ConsultationEmbeddingService {
 		if (consultation.getAnswerContent() != null && !consultation.getAnswerContent().trim().isEmpty()) {
 			String cleanAnswer = removeHtmlTags(consultation.getAnswerContent());
 			if (!cleanAnswer.trim().isEmpty()) {
-				text.append("답변: ").append(cleanAnswer);
+				text.append("답변: ").append(cleanAnswer).append("\n");
 			}
+		}
+
+		// 연관 법령 조문 추가 (lawArticleCodes)
+		if (consultation.getLawArticleCodes() != null && !consultation.getLawArticleCodes().isEmpty()) {
+			text.append("연관 법령: ");
+			List<String> lawArticleStrings = consultation.getLawArticleCodes().stream()
+					.map(lawCode -> {
+						// 조문 키를 한국어 형식으로 변환 (예: "제1조", "제1조의2")
+						return LawArticleCode.convertToKoreanFormat(lawCode.getArticleKey());
+					})
+					.toList();
+			text.append(String.join(", ", lawArticleStrings));
 		}
 
 		return text.toString().trim();
@@ -281,6 +294,20 @@ public class ConsultationEmbeddingService {
 			metadata.put("createdAt", consultation.getCounselAt().toString());
 		}
 
+		// 연관 법령 조문 정보 추가
+		if (consultation.getLawArticleCodes() != null && !consultation.getLawArticleCodes().isEmpty()) {
+			List<String> lawArticleKeys = consultation.getLawArticleCodes().stream()
+					.map(LawArticleCode::getArticleKey)
+					.toList();
+			metadata.put("lawArticleKeys", lawArticleKeys);
+			
+			// 한국어 형식으로도 저장 (검색 시 활용)
+			List<String> lawArticleFormats = consultation.getLawArticleCodes().stream()
+					.map(lawCode -> LawArticleCode.convertToKoreanFormat(lawCode.getArticleKey()))
+					.toList();
+			metadata.put("lawArticles", lawArticleFormats);
+		}
+
 		return metadata;
 	}
 
@@ -337,6 +364,69 @@ public class ConsultationEmbeddingService {
 	}
 
 	/**
+	 * 특정 상담의 임베딩을 삭제하고 재임베딩
+	 * lawArticleCodes를 추가한 후 기존 임베딩을 업데이트할 때 사용합니다.
+	 * 
+	 * @param consultationId 상담 ID
+	 */
+	@Transactional
+	public void reembedConsultation(Long consultationId) {
+		log.info("상담 ID {} 재임베딩 시작", consultationId);
+		
+		// 1. 기존 임베딩 삭제 (메타데이터로 필터링)
+		deleteEmbeddingsByConsultationId(consultationId);
+		
+		// 2. 재임베딩
+		embedConsultation(consultationId);
+		
+		log.info("상담 ID {} 재임베딩 완료", consultationId);
+	}
+
+	/**
+	 * 특정 상담 ID의 모든 임베딩을 삭제
+	 * PgVectorStore의 경우 메타데이터로 필터링하여 삭제합니다.
+	 * 
+	 * @param consultationId 상담 ID
+	 */
+	@Transactional
+	public void deleteEmbeddingsByConsultationId(Long consultationId) {
+		log.info("상담 ID {}의 임베딩 삭제 시작", consultationId);
+		
+		// Spring AI VectorStore는 직접적인 삭제 메서드를 제공하지 않으므로
+		// PgVectorStore의 경우 SQL을 직접 실행해야 합니다.
+		// 하지만 일반적으로는 VectorStore 구현체에 따라 다릅니다.
+		
+		// 방법 1: VectorStore에 delete 메서드가 있는 경우
+		// vectorStore.delete(List.of(consultationId.toString()));
+		
+		// 방법 2: SQL 직접 실행 (PgVectorStore의 경우)
+		// JdbcTemplate을 주입받아서 사용하거나, 별도 서비스에서 처리
+		log.warn("상담 ID {}의 임베딩 삭제는 SQL로 직접 실행 필요: " +
+				"DELETE FROM spring_ai_vector_store WHERE metadata->>'consultationId' = '{}'",
+				consultationId, consultationId);
+		
+		// TODO: JdbcTemplate을 주입받아서 SQL 실행하도록 구현
+		// 또는 VectorStore 확장하여 deleteByMetadata 메서드 추가
+	}
+
+	/**
+	 * 모든 상담 데이터를 재임베딩
+	 * lawArticleCodes를 추가한 후 전체 재임베딩이 필요한 경우 사용합니다.
+	 * 
+	 * @return 처리된 상담 수
+	 */
+	@Transactional
+	public int reembedAllConsultations() {
+		log.warn("전체 상담 데이터 재임베딩 시작 (기존 임베딩 삭제 후 재생성)");
+		
+		// 1. 기존 임베딩 전체 삭제
+		deleteAllEmbeddings();
+		
+		// 2. 전체 재임베딩
+		return embedAllConsultations();
+	}
+
+	/**
 	 * Vector Store의 모든 데이터 삭제 (주의: 개발/테스트용)
 	 */
 	@Transactional
@@ -345,6 +435,6 @@ public class ConsultationEmbeddingService {
 		// Spring AI Vector Store는 deleteAll 메서드를 제공하지 않으므로
 		// 직접 SQL을 실행하거나 Vector Store 구현체에 따라 다릅니다.
 		// PgVectorStore의 경우 직접 SQL 실행 필요
-		log.warn("Vector Store 데이터 삭제는 수동으로 SQL 실행 필요: DELETE FROM vector_store;");
+		log.warn("Vector Store 데이터 삭제는 수동으로 SQL 실행 필요: DELETE FROM spring_ai_vector_store;");
 	}
 }

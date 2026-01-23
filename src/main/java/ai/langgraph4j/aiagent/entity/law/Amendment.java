@@ -1,0 +1,54 @@
+package ai.langgraph4j.aiagent.entity.law;
+
+import java.time.LocalDateTime;
+
+import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.UpdateTimestamp;
+
+import com.fasterxml.jackson.annotation.JsonBackReference;
+import com.fasterxml.jackson.annotation.JsonIgnore;
+
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.OneToOne;
+import jakarta.persistence.SequenceGenerator;
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.EqualsAndHashCode;
+import lombok.NoArgsConstructor;
+
+/**
+ * Amendment : 개정문 내용
+ */
+@Entity
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+@EqualsAndHashCode(of = "id")
+public class Amendment {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.SEQUENCE, generator = "AMENDMENT_SEQ_GENERATOR")
+    @SequenceGenerator(name = "AMENDMENT_SEQ_GENERATOR", sequenceName = "AMENDMENT_SEQ", allocationSize = 100)
+    private Long id;
+
+    @Column(columnDefinition = "TEXT")
+    private String amendmentContent; // 개정문내용
+
+    @CreationTimestamp
+    @Column(updatable = false)
+    @JsonIgnore
+    private LocalDateTime registAt;
+
+    @UpdateTimestamp
+    @JsonIgnore
+    private LocalDateTime updateAt;
+
+    @OneToOne
+    @JsonBackReference
+    private LawBasicInformation lawBasicInformation;
+
+}
