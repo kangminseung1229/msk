@@ -3,6 +3,7 @@ package ai.langgraph4j.aiagent.config;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.ai.vectorstore.pgvector.PgVectorStore;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -17,6 +18,9 @@ import lombok.extern.slf4j.Slf4j;
 @Configuration
 public class VectorStoreConfig {
 
+	@Value("${spring.ai.vectorstore.pgvector.dimensions:1536}")
+	private int dimensions;
+
 	/**
 	 * Vector Store Bean 생성
 	 * PostgreSQL pgvector를 사용합니다.
@@ -27,15 +31,15 @@ public class VectorStoreConfig {
 	 */
 	@Bean
 	public VectorStore vectorStore(EmbeddingModel embeddingModel, JdbcTemplate jdbcTemplate) {
-		log.info("VectorStore 생성: PgVectorStore (PostgreSQL pgvector)");
+		log.info("VectorStore 생성: PgVectorStore (PostgreSQL pgvector) - dimensions: {}", dimensions);
 
 		VectorStore vectorStore = PgVectorStore.builder(jdbcTemplate, embeddingModel)
-				.dimensions(768) // Gemini Embedding 차원
+				.dimensions(dimensions) // application.properties에서 설정한 차원 사용
 				.vectorTableName("spring_ai_vector_store") // 커스텀 테이블 이름
 				.initializeSchema(false) // 테이블이 이미 존재하므로 자동 생성 비활성화
 				.build();
 
-		log.info("VectorStore 초기화 완료 (스키마는 수동으로 생성해야 합니다)");
+		log.info("VectorStore 초기화 완료 (dimensions: {}, 스키마는 수동으로 생성해야 합니다)", dimensions);
 
 		return vectorStore;
 	}

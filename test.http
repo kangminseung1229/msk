@@ -1,1 +1,2 @@
 ### http 정리
+POST http://localhost:8080/api/embedding/law/all
