@@ -1,5 +1,7 @@
 package ai.langgraph4j.aiagent.controller;
 
+import java.util.List;
+
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -8,6 +10,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import ai.langgraph4j.aiagent.controller.dto.TokenEstimateResponse;
+import ai.langgraph4j.aiagent.entity.law.TaxLawCode;
+import ai.langgraph4j.aiagent.repository.TaxLawCodeRepository;
 import ai.langgraph4j.aiagent.service.CounselEmbeddingService;
 import ai.langgraph4j.aiagent.service.LawArticleEmbeddingService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -33,22 +37,16 @@ public class EmbeddingController {
 
 	private final CounselEmbeddingService counselEmbeddingService;
 	private final LawArticleEmbeddingService lawArticleEmbeddingService;
+	private final TaxLawCodeRepository taxLawCodeRepository;
 
 	/**
 	 * 모든 상담 데이터 임베딩
 	 * 
 	 * @return 처리된 상담 수
 	 */
-	@Operation(
-			summary = "전체 상담 데이터 임베딩",
-			description = "모든 상담 데이터를 임베딩하여 Vector Store에 저장합니다."
-	)
+	@Operation(summary = "전체 상담 데이터 임베딩", description = "모든 상담 데이터를 임베딩하여 Vector Store에 저장합니다.")
 	@ApiResponses(value = {
-			@ApiResponse(
-					responseCode = "200",
-					description = "임베딩 완료",
-					content = @Content(schema = @Schema(implementation = EmbeddingResponse.class))
-			)
+			@ApiResponse(responseCode = "200", description = "임베딩 완료", content = @Content(schema = @Schema(implementation = EmbeddingResponse.class)))
 	})
 	@PostMapping("/counsel/all")
 	public ResponseEntity<EmbeddingResponse> embedAllCounsel() {
@@ -67,25 +65,14 @@ public class EmbeddingController {
 	 * @param counselId 상담 ID
 	 * @return 응답
 	 */
-	@Operation(
-			summary = "특정 상담 데이터 임베딩",
-			description = "지정된 상담 ID의 데이터를 임베딩하여 Vector Store에 저장합니다."
-	)
+	@Operation(summary = "특정 상담 데이터 임베딩", description = "지정된 상담 ID의 데이터를 임베딩하여 Vector Store에 저장합니다.")
 	@ApiResponses(value = {
-			@ApiResponse(
-					responseCode = "200",
-					description = "임베딩 완료",
-					content = @Content(schema = @Schema(implementation = EmbeddingResponse.class))
-			),
-			@ApiResponse(
-					responseCode = "400",
-					description = "상담을 찾을 수 없음"
-			)
+			@ApiResponse(responseCode = "200", description = "임베딩 완료", content = @Content(schema = @Schema(implementation = EmbeddingResponse.class))),
+			@ApiResponse(responseCode = "400", description = "상담을 찾을 수 없음")
 	})
 	@PostMapping("/counsel/{counselId}")
 	public ResponseEntity<EmbeddingResponse> embedOneCounsel(
-			@Parameter(description = "상담 ID", required = true, example = "1")
-			@PathVariable Long counselId) {
+			@Parameter(description = "상담 ID", required = true, example = "1") @PathVariable Long counselId) {
 		log.info("상담 ID {} 임베딩 요청", counselId);
 
 		counselEmbeddingService.embedConsultation(counselId);
@@ -100,16 +87,9 @@ public class EmbeddingController {
 	 * 
 	 * @return 처리된 조문 수
 	 */
-	@Operation(
-			summary = "전체 법령 조문 임베딩",
-			description = "모든 lawId별 최신 법령의 조문들을 임베딩하여 Vector Store에 저장합니다."
-	)
+	@Operation(summary = "전체 법령 조문 임베딩", description = "모든 lawId별 최신 법령의 조문들을 임베딩하여 Vector Store에 저장합니다.")
 	@ApiResponses(value = {
-			@ApiResponse(
-					responseCode = "200",
-					description = "임베딩 완료",
-					content = @Content(schema = @Schema(implementation = EmbeddingResponse.class))
-			)
+			@ApiResponse(responseCode = "200", description = "임베딩 완료", content = @Content(schema = @Schema(implementation = EmbeddingResponse.class)))
 	})
 	@PostMapping("/law/all")
 	public ResponseEntity<EmbeddingResponse> embedAllLawArticles() {
@@ -122,31 +102,32 @@ public class EmbeddingController {
 				count));
 	}
 
+	@PostMapping("/law/tax")
+	public ResponseEntity<EmbeddingResponse> embedTaxLawArticles() {
+
+		List<TaxLawCode> taxLawCodes = taxLawCodeRepository.findAll();
+		for (TaxLawCode taxLawCode : taxLawCodes) {
+			lawArticleEmbeddingService.embedLatestLawArticlesByLawId(taxLawCode.getLawId());
+		}
+		return ResponseEntity.ok(new EmbeddingResponse(
+				"세무법 표현 임베딩 완료",
+				taxLawCodes.size()));
+	}
+
 	/**
 	 * 특정 법령 ID의 조문 임베딩
 	 * 
 	 * @param lawId 법령 ID
 	 * @return 응답
 	 */
-	@Operation(
-			summary = "특정 법령 조문 임베딩",
-			description = "지정된 법령 ID의 최신 조문들을 임베딩하여 Vector Store에 저장합니다."
-	)
+	@Operation(summary = "특정 법령 조문 임베딩", description = "지정된 법령 ID의 최신 조문들을 임베딩하여 Vector Store에 저장합니다.")
 	@ApiResponses(value = {
-			@ApiResponse(
-					responseCode = "200",
-					description = "임베딩 완료",
-					content = @Content(schema = @Schema(implementation = EmbeddingResponse.class))
-			),
-			@ApiResponse(
-					responseCode = "400",
-					description = "법령을 찾을 수 없음"
-			)
+			@ApiResponse(responseCode = "200", description = "임베딩 완료", content = @Content(schema = @Schema(implementation = EmbeddingResponse.class))),
+			@ApiResponse(responseCode = "400", description = "법령을 찾을 수 없음")
 	})
 	@PostMapping("/law/{lawId}")
 	public ResponseEntity<EmbeddingResponse> embedLawArticlesByLawId(
-			@Parameter(description = "법령 ID", required = true, example = "법령ID001")
-			@PathVariable String lawId) {
+			@Parameter(description = "법령 ID", required = true, example = "법령ID001") @PathVariable String lawId) {
 		log.info("법령 ID {} 임베딩 요청", lawId);
 
 		int count = lawArticleEmbeddingService.embedLatestLawArticlesByLawId(lawId);
@@ -162,26 +143,15 @@ public class EmbeddingController {
 	 * @param lawId 법령 ID
 	 * @return 토큰 계산 결과
 	 */
-	@Operation(
-			summary = "법령 조문 임베딩 토큰 수 및 비용 예상 계산",
-			description = "지정된 법령 ID의 최신 조문들을 임베딩할 때 예상되는 토큰 수와 비용을 계산합니다. "
-					+ "lawKey 기준 최신 LawBasicInformation을 구하고, LawArticleMetadata로 임베딩한다고 가정하여 계산합니다."
-	)
+	@Operation(summary = "법령 조문 임베딩 토큰 수 및 비용 예상 계산", description = "지정된 법령 ID의 최신 조문들을 임베딩할 때 예상되는 토큰 수와 비용을 계산합니다. "
+			+ "lawKey 기준 최신 LawBasicInformation을 구하고, LawArticleMetadata로 임베딩한다고 가정하여 계산합니다.")
 	@ApiResponses(value = {
-			@ApiResponse(
-					responseCode = "200",
-					description = "토큰 계산 완료",
-					content = @Content(schema = @Schema(implementation = TokenEstimateResponse.class))
-			),
-			@ApiResponse(
-					responseCode = "400",
-					description = "법령을 찾을 수 없음"
-			)
+			@ApiResponse(responseCode = "200", description = "토큰 계산 완료", content = @Content(schema = @Schema(implementation = TokenEstimateResponse.class))),
+			@ApiResponse(responseCode = "400", description = "법령을 찾을 수 없음")
 	})
 	@GetMapping("/law/{lawId}/token-estimate")
 	public ResponseEntity<TokenEstimateResponse> estimateTokensByLawId(
-			@Parameter(description = "법령 ID", required = true, example = "법령ID001")
-			@PathVariable String lawId) {
+			@Parameter(description = "법령 ID", required = true, example = "법령ID001") @PathVariable String lawId) {
 		log.info("법령 ID {} 토큰 계산 요청", lawId);
 
 		TokenEstimateResponse response = lawArticleEmbeddingService.estimateTokensByLawId(lawId);
@@ -194,9 +164,7 @@ public class EmbeddingController {
 	 */
 	@Schema(description = "임베딩 처리 결과")
 	public record EmbeddingResponse(
-			@Schema(description = "처리 결과 메시지", example = "전체 상담 데이터 임베딩 완료")
-			String message,
-			@Schema(description = "처리된 데이터 수", example = "100")
-			int processedCount) {
+			@Schema(description = "처리 결과 메시지", example = "전체 상담 데이터 임베딩 완료") String message,
+			@Schema(description = "처리된 데이터 수", example = "100") int processedCount) {
 	}
 }
