@@ -1,5 +1,7 @@
 package ai.langgraph4j.aiagent.service.dto;
 
+import java.util.List;
+
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -53,4 +55,53 @@ public class SearchResult {
 	 * 유사도 점수 (0.0 ~ 1.0, 높을수록 더 유사)
 	 */
 	private Double similarityScore;
+
+	/**
+	 * 문서 타입 ("counsel" 또는 "lawArticle")
+	 */
+	private String documentType;
+
+	/**
+	 * 연관 법령 조문 정보 리스트
+	 */
+	private List<LawArticleInfo> lawArticles;
+
+	/**
+	 * 법령 조문 정보 DTO
+	 */
+	@Data
+	@Builder
+	@NoArgsConstructor
+	@AllArgsConstructor
+	public static class LawArticleInfo {
+		/**
+		 * 법령 ID
+		 */
+		private String lawId;
+
+		/**
+		 * 법령명 (한국어)
+		 */
+		private String lawNameKorean;
+
+		/**
+		 * 조문 키
+		 */
+		private String articleKey;
+
+		/**
+		 * 조문 한국어 표현 (예: "제 10조의 21")
+		 */
+		private String articleKoreanString;
+
+		/**
+		 * 조문제목
+		 */
+		private String articleTitle;
+
+		/**
+		 * 조문 내용 (articleLinkContent 또는 articleOriginalContent)
+		 */
+		private String articleContent;
+	}
 }

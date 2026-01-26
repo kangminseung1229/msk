@@ -269,20 +269,21 @@ public class GeminiTextService {
 
 		CompletableFuture.runAsync(() -> {
 			try {
-				// RAG 패턴: 벡터 검색을 통해 관련 상담 데이터 검색
+				// RAG 패턴: 하이브리드 벡터 검색 (상담 데이터 + 법령 데이터)
 				String searchContext = "";
 				try {
-					log.info("벡터 검색 시작 - query: {}", userPrompt);
-					var searchResults = consultationSearchService.search(userPrompt, 10, 0.6);
+					log.info("하이브리드 벡터 검색 시작 - query: {}", userPrompt);
+					// 하이브리드 검색: 상담 10건 + 법령 10건 + 연관 법령
+					var searchResults = consultationSearchService.hybridSearch(userPrompt, 10, 10, 0.6);
 
 					if (!searchResults.isEmpty()) {
 						searchContext = formatSearchResultsForContext(searchResults);
-						log.info("벡터 검색 완료 - {}건의 결과를 컨텍스트로 추가", searchResults.size());
+						log.info("하이브리드 벡터 검색 완료 - {}건의 결과를 컨텍스트로 추가", searchResults.size());
 					} else {
-						log.warn("벡터 검색 결과가 없습니다");
+						log.warn("하이브리드 벡터 검색 결과가 없습니다");
 					}
 				} catch (Exception e) {
-					log.error("벡터 검색 중 오류 발생 (계속 진행)", e);
+					log.error("하이브리드 벡터 검색 중 오류 발생 (계속 진행)", e);
 					// 검색 실패해도 계속 진행
 				}
 
@@ -310,14 +311,34 @@ public class GeminiTextService {
 					responseFlux
 							.doOnNext(chatResponse -> {
 								try {
-									if (chatResponse == null || chatResponse.getResult() == null
-											|| chatResponse.getResult().getOutput() == null) {
-										log.warn("스트리밍 응답에 필수 필드가 없습니다: {}", chatResponse);
+									// ChatResponse 자체가 null인 경우
+									if (chatResponse == null) {
+										log.warn("스트리밍 응답이 null입니다");
+										return;
+									}
+
+									// Result가 null인 경우
+									if (chatResponse.getResult() == null) {
+										// Tool 호출 중이거나 중간 응답일 수 있으므로 디버그 레벨로만 로깅
+										log.debug("스트리밍 응답에 result가 없습니다 (Tool 호출 중이거나 중간 응답일 수 있음)");
+										// 메타데이터 확인
+										if (chatResponse.getMetadata() != null) {
+											log.debug("  - Usage: {}", chatResponse.getMetadata().getUsage());
+										}
+										return;
+									}
+
+									// Output이 null인 경우
+									if (chatResponse.getResult().getOutput() == null) {
+										// Tool 호출 중이거나 중간 응답일 수 있으므로 디버그 레벨로만 로깅
+										log.debug("스트리밍 응답에 output이 없습니다 (Tool 호출 중이거나 중간 응답일 수 있음)");
 										return;
 									}
 
 									String currentText = chatResponse.getResult().getOutput().getText();
-									if (currentText == null) {
+									if (currentText == null || currentText.isEmpty()) {
+										// 텍스트가 없는 경우는 정상일 수 있음 (중간 응답 또는 Tool 호출 중)
+										log.debug("스트리밍 응답에 텍스트가 없습니다 (중간 응답 또는 Tool 호출 중일 수 있음)");
 										return;
 									}
 
@@ -424,6 +445,7 @@ public class GeminiTextService {
 
 	/**
 	 * 검색 결과를 LLM 컨텍스트로 사용할 수 있는 형태로 포맷팅
+	 * 하이브리드 검색 결과(상담 + 법령)를 처리합니다.
 	 * 
 	 * @param results 검색 결과 리스트
 	 * @return 포맷팅된 검색 결과 문자열
@@ -431,29 +453,81 @@ public class GeminiTextService {
 	private String formatSearchResultsForContext(List<SearchResult> results) {
 		StringBuilder sb = new StringBuilder();
 
-		for (int i = 0; i < results.size(); i++) {
-			var result = results.get(i);
-			sb.append("\n[상담 사례 ").append(i + 1).append("]\n");
+		// 상담 결과와 법령 결과를 구분하여 표시
+		List<SearchResult> counselResults = results.stream()
+				.filter(r -> "counsel".equals(r.getDocumentType()))
+				.toList();
+		List<SearchResult> lawArticleResults = results.stream()
+				.filter(r -> "lawArticle".equals(r.getDocumentType()))
+				.toList();
 
-			if (result.getTitle() != null) {
-				sb.append("제목: ").append(result.getTitle()).append("\n");
-			}
+		if (!counselResults.isEmpty()) {
+			sb.append("\n=== 관련 상담 사례 ===\n");
+			for (int i = 0; i < counselResults.size(); i++) {
+				var result = counselResults.get(i);
+				sb.append("\n[상담 사례 ").append(i + 1).append("]\n");
 
-			if (result.getFieldLarge() != null) {
-				sb.append("분야: ").append(result.getFieldLarge()).append("\n");
-			}
-
-			if (result.getContent() != null) {
-				// 내용이 너무 길면 잘라서 표시
-				String content = result.getContent();
-				if (content.length() > 800) {
-					content = content.substring(0, 800) + "...";
+				if (result.getTitle() != null) {
+					sb.append("제목: ").append(result.getTitle()).append("\n");
 				}
-				sb.append("내용: ").append(content).append("\n");
-			}
 
-			if (result.getSimilarityScore() != null) {
-				sb.append("유사도: ").append(String.format("%.2f", result.getSimilarityScore())).append("\n");
+				if (result.getFieldLarge() != null) {
+					sb.append("분야: ").append(result.getFieldLarge()).append("\n");
+				}
+
+				if (result.getContent() != null) {
+					// 내용이 너무 길면 잘라서 표시
+					String content = result.getContent();
+					if (content.length() > 800) {
+						content = content.substring(0, 800) + "...";
+					}
+					sb.append("내용: ").append(content).append("\n");
+				}
+
+				if (result.getSimilarityScore() != null) {
+					sb.append("유사도: ").append(String.format("%.2f", result.getSimilarityScore())).append("\n");
+				}
+			}
+		}
+
+		if (!lawArticleResults.isEmpty()) {
+			sb.append("\n=== 관련 법령 조문 ===\n");
+			for (int i = 0; i < lawArticleResults.size(); i++) {
+				var result = lawArticleResults.get(i);
+				sb.append("\n[법령 조문 ").append(i + 1).append("]\n");
+
+				if (result.getTitle() != null) {
+					sb.append("제목: ").append(result.getTitle()).append("\n");
+				}
+
+				if (result.getContent() != null) {
+					// 내용이 너무 길면 잘라서 표시
+					String content = result.getContent();
+					if (content.length() > 800) {
+						content = content.substring(0, 800) + "...";
+					}
+					sb.append("내용: ").append(content).append("\n");
+				}
+
+				if (result.getSimilarityScore() != null) {
+					sb.append("유사도: ").append(String.format("%.2f", result.getSimilarityScore())).append("\n");
+				}
+
+				// 연관 법령 조문 정보 추가
+				if (result.getLawArticles() != null && !result.getLawArticles().isEmpty()) {
+					for (var lawArticle : result.getLawArticles()) {
+						if (lawArticle.getLawNameKorean() != null || lawArticle.getArticleKoreanString() != null) {
+							sb.append("법령: ");
+							if (lawArticle.getLawNameKorean() != null) {
+								sb.append(lawArticle.getLawNameKorean()).append(" ");
+							}
+							if (lawArticle.getArticleKoreanString() != null) {
+								sb.append(lawArticle.getArticleKoreanString());
+							}
+							sb.append("\n");
+						}
+					}
+				}
 			}
 		}
 

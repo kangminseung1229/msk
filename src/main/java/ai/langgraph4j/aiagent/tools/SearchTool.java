@@ -51,10 +51,10 @@ public class SearchTool {
 
 		try {
 			query = query.trim();
-			log.info("SearchTool: 벡터 검색 시작 - {}", query);
+			log.info("SearchTool: 하이브리드 검색 시작 - {}", query);
 
-			// 벡터 검색 수행 (기본값: topK=5, similarityThreshold=0.6)
-			List<SearchResult> results = consultationSearchService.search(query, 5, 0.6);
+			// 하이브리드 검색 수행 (상담 10건 + 법령 10건 + 연관 법령)
+			List<SearchResult> results = consultationSearchService.hybridSearch(query, 10, 10, 0.6);
 
 			if (results.isEmpty()) {
 				log.warn("SearchTool: 검색 결과가 없습니다 - {}", query);
@@ -67,7 +67,7 @@ public class SearchTool {
 			// 검색 결과를 LLM에 전달 가능한 형태로 포맷팅
 			String formattedResult = formatSearchResults(query, results);
 
-			log.info("SearchTool: 벡터 검색 완료 - {}건의 결과 반환", results.size());
+			log.info("SearchTool: 하이브리드 검색 완료 - {}건의 결과 반환", results.size());
 			return formattedResult;
 
 		} catch (Exception e) {
@@ -88,41 +88,101 @@ public class SearchTool {
 		sb.append("검색어: ").append(query).append("\n");
 		sb.append("검색 결과 (").append(results.size()).append("건):\n\n");
 
-		for (int i = 0; i < results.size(); i++) {
-			SearchResult result = results.get(i);
-			sb.append("[").append(i + 1).append("] ");
+		// 상담 결과와 법령 결과를 구분하여 표시
+		List<SearchResult> counselResults = results.stream()
+				.filter(r -> "counsel".equals(r.getDocumentType()))
+				.toList();
+		List<SearchResult> lawArticleResults = results.stream()
+				.filter(r -> "lawArticle".equals(r.getDocumentType()))
+				.toList();
 
-			if (result.getTitle() != null) {
-				sb.append("제목: ").append(result.getTitle()).append("\n");
+		if (!counselResults.isEmpty()) {
+			sb.append("=== 상담 사례 (").append(counselResults.size()).append("건) ===\n\n");
+			for (int i = 0; i < counselResults.size(); i++) {
+				SearchResult result = counselResults.get(i);
+				formatSearchResult(sb, i + 1, result, true);
 			}
-
-			if (result.getFieldLarge() != null) {
-				sb.append("     분야: ").append(result.getFieldLarge()).append("\n");
-			}
-
-			if (result.getContent() != null) {
-				// 내용이 너무 길면 잘라서 표시
-				String content = result.getContent();
-				if (content.length() > 500) {
-					content = content.substring(0, 500) + "...";
-				}
-				sb.append("     내용: ").append(content).append("\n");
-			}
-
-			if (result.getSimilarityScore() != null) {
-				sb.append("     유사도: ").append(String.format("%.2f", result.getSimilarityScore())).append("\n");
-			}
-
-			if (result.getCounselId() != null) {
-				sb.append("     상담ID: ").append(result.getCounselId()).append("\n");
-			}
-
-			sb.append("\n");
 		}
 
-		sb.append("위 검색 결과를 참고하여 사용자의 질문에 답변해주세요.");
+		if (!lawArticleResults.isEmpty()) {
+			sb.append("\n=== 법령 조문 (").append(lawArticleResults.size()).append("건) ===\n\n");
+			for (int i = 0; i < lawArticleResults.size(); i++) {
+				SearchResult result = lawArticleResults.get(i);
+				formatSearchResult(sb, i + 1, result, false);
+			}
+		}
+
+		sb.append("\n위 검색 결과를 참고하여 사용자의 질문에 답변해주세요.");
 
 		return sb.toString();
+	}
+
+	/**
+	 * 개별 검색 결과를 포맷팅
+	 * 
+	 * @param sb        StringBuilder
+	 * @param index     결과 인덱스
+	 * @param result    검색 결과
+	 * @param isCounsel 상담 결과 여부
+	 */
+	private void formatSearchResult(StringBuilder sb, int index, SearchResult result, boolean isCounsel) {
+		sb.append("[").append(index).append("] ");
+
+		if (result.getTitle() != null) {
+			sb.append("제목: ").append(result.getTitle()).append("\n");
+		}
+
+		if (isCounsel && result.getFieldLarge() != null) {
+			sb.append("     분야: ").append(result.getFieldLarge()).append("\n");
+		}
+
+		if (result.getContent() != null) {
+			// 내용이 너무 길면 잘라서 표시
+			String content = result.getContent();
+			if (content.length() > 500) {
+				content = content.substring(0, 500) + "...";
+			}
+			sb.append("     내용: ").append(content).append("\n");
+		}
+
+		// 연관 법령 조문 정보 추가 (상담 결과인 경우)
+		if (isCounsel && result.getLawArticles() != null && !result.getLawArticles().isEmpty()) {
+			sb.append("     연관 법령 조문:\n");
+			for (SearchResult.LawArticleInfo lawArticle : result.getLawArticles()) {
+				sb.append("       - ");
+				if (lawArticle.getLawNameKorean() != null) {
+					sb.append(lawArticle.getLawNameKorean()).append(" ");
+				}
+				if (lawArticle.getArticleKoreanString() != null) {
+					sb.append(lawArticle.getArticleKoreanString());
+				} else if (lawArticle.getArticleKey() != null) {
+					sb.append("(조문키: ").append(lawArticle.getArticleKey()).append(")");
+				}
+				if (lawArticle.getArticleTitle() != null) {
+					sb.append(" - ").append(lawArticle.getArticleTitle());
+				}
+				sb.append("\n");
+
+				// 조문 내용 추가 (너무 길면 잘라서 표시)
+				if (lawArticle.getArticleContent() != null) {
+					String articleContent = lawArticle.getArticleContent();
+					if (articleContent.length() > 300) {
+						articleContent = articleContent.substring(0, 300) + "...";
+					}
+					sb.append("         조문 내용: ").append(articleContent).append("\n");
+				}
+			}
+		}
+
+		if (result.getSimilarityScore() != null) {
+			sb.append("     유사도: ").append(String.format("%.2f", result.getSimilarityScore())).append("\n");
+		}
+
+		if (isCounsel && result.getCounselId() != null) {
+			sb.append("     상담ID: ").append(result.getCounselId()).append("\n");
+		}
+
+		sb.append("\n");
 	}
 
 	/**
