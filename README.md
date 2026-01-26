@@ -27,7 +27,7 @@ spring.ai.google.genai.api-key=your-api-key-here
 ### 3. 애플리케이션 실행
 
 ```bash
-./gradlew bootRun
+./mvnw spring-boot:run
 ```
 
 또는 IDE에서 `AiagentApplication` 클래스를 실행

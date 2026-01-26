@@ -22,19 +22,19 @@ echo -e "${GREEN}배포 스크립트 시작${NC}"
 echo -e "${GREEN}========================================${NC}"
 
 # 1. 빌드
-echo -e "${YELLOW}[1/3] Gradle 빌드 중...${NC}"
-./gradlew build -x test --no-daemon
+echo -e "${YELLOW}[1/3] Maven 빌드 중...${NC}"
+./mvnw clean package -DskipTests -B
 
 if [ $? -ne 0 ]; then
     echo -e "${RED}빌드 실패!${NC}"
     exit 1
 fi
 
-# JAR 파일 찾기
-JAR_FILE=$(find build/libs -name "*.jar" ! -name "*-plain.jar" | head -n 1)
+# JAR 파일 찾기 (fat JAR만, -plain 제외)
+JAR_FILE=$(find target -name "*.jar" ! -name "*-plain.jar" | head -n 1)
 
 if [ -z "$JAR_FILE" ]; then
-    echo -e "${RED}JAR 파일을 찾을 수 없습니다!${NC}"
+    echo -e "${RED}JAR 파일을 찾을 수 없습니다. (target/ 확인)${NC}"
     exit 1
 fi
 

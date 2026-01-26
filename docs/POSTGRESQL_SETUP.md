@@ -187,7 +187,7 @@ spring.datasource.driver-class-name=org.postgresql.Driver
 ### 애플리케이션 실행
 
 ```bash
-./gradlew bootRun
+./mvnw spring-boot:run
 ```
 
 ### 로그 확인
@@ -299,7 +299,7 @@ docker exec -it postgres-pgvector psql -U postgres -d consultation_db -c "CREATE
 # spring.datasource.password=postgres
 
 # 4. 애플리케이션 실행
-./gradlew bootRun
+./mvnw spring-boot:run
 ```
 
 ---

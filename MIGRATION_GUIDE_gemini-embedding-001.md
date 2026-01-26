@@ -52,9 +52,9 @@ DROP INDEX IF EXISTS vector_store_embedding_idx;
 ### 4. 애플리케이션 재시작
 ```bash
 # 애플리케이션 재시작
-./gradlew bootRun
+./mvnw spring-boot:run
 # 또는
-mvn spring-boot:run
+./mvnw spring-boot:run
 ```
 
 ### 5. 벡터 데이터 재생성

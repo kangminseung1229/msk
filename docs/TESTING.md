@@ -94,7 +94,7 @@ curl -X POST http://localhost:8080/api/test/agent/invoke \
 
 1. 애플리케이션 실행:
 ```bash
-./gradlew bootRun
+./mvnw spring-boot:run
 ```
 
 2. 기본 포트: `8080`
@@ -121,7 +121,7 @@ curl -X POST http://localhost:8080/api/test/agent/invoke \
 - OpenAI API 접근 가능 여부 확인
 
 ### 컴파일 오류
-- `./gradlew clean build` 실행
+- `./mvnw clean compile` 실행
 - IDE에서 프로젝트 새로고침
 
 ---

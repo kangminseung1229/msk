@@ -13,9 +13,11 @@ import lombok.extern.slf4j.Slf4j;
 /**
  * Vector Store 설정
  * PostgreSQL pgvector를 사용하여 벡터를 저장하고 검색합니다.
+ * test 프로파일에서는 DataSource/JPA가 제외되므로 로드하지 않습니다.
  */
 @Slf4j
 @Configuration
+@org.springframework.context.annotation.Profile("!test")
 public class VectorStoreConfig {
 
 	@Value("${spring.ai.vectorstore.pgvector.dimensions:1536}")

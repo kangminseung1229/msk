@@ -11,7 +11,7 @@
 
 #### Phase 0: 준비 단계 ✅
 - [x] 의존성 추가 (Spring AI, LangGraph4j)
-- [x] 개발 환경 설정 (Java 17+, Gradle)
+- [x] 개발 환경 설정 (Java 17+, Maven)
 - [x] 기술 스택 학습
 
 #### Phase 1: 요구사항 정의 및 설계 ✅

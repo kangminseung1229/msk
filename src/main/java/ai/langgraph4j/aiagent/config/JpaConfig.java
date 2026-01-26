@@ -10,8 +10,10 @@ import jakarta.persistence.EntityManager;
 /**
  * JPA 설정
  * QueryDSL을 위한 JPAQueryFactory 빈을 제공합니다.
+ * test 프로파일에서는 JPA/DataSource가 제외되므로 로드하지 않습니다.
  */
 @Configuration
+@org.springframework.context.annotation.Profile("!test")
 public class JpaConfig {
 
 	/**

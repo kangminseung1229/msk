@@ -317,8 +317,8 @@ CREATE EXTENSION IF NOT EXISTS vector;
 ### 3. 애플리케이션 실행
 
 ```bash
-# Gradle로 실행
-./gradlew bootRun
+# Maven으로 실행
+./mvnw spring-boot:run
 
 # 또는 IDE에서 AiagentApplication 실행
 ```
