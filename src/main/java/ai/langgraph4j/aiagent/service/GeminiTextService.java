@@ -276,18 +276,22 @@ public class GeminiTextService {
 				if (effectiveSystemInstruction == null || effectiveSystemInstruction.isBlank()) {
 					effectiveSystemInstruction = promptConfig.getSearchQueryContextPrefix();
 					log.info("systemInstruction이 없어서 search-query-context.txt의 내용을 기본값으로 사용: {}",
-							effectiveSystemInstruction.substring(0, Math.min(200, effectiveSystemInstruction.length())) + "...");
+							effectiveSystemInstruction.substring(0, Math.min(200, effectiveSystemInstruction.length()))
+									+ "...");
 				}
-				
+
 				// RAG 패턴: 하이브리드 벡터 검색 (상담 데이터 + 법령 데이터)
 				String searchContext = "";
+				// 상담 사례 인덱스 -> counselId 맵 (후처리에서 링크 변환에 사용)
+				java.util.Map<Integer, Long> counselIndexToIdMap = new java.util.HashMap<>();
 				try {
 					log.info("하이브리드 벡터 검색 시작 - query: {}, systemInstruction 적용: {}",
 							userPrompt, effectiveSystemInstruction != null && !effectiveSystemInstruction.isBlank());
-					log.info("사용할 systemInstruction: {}", 
-							effectiveSystemInstruction != null && !effectiveSystemInstruction.isBlank() 
-								? effectiveSystemInstruction.substring(0, Math.min(200, effectiveSystemInstruction.length())) + "..." 
-								: "null 또는 빈 문자열");
+					log.info("사용할 systemInstruction: {}",
+							effectiveSystemInstruction != null && !effectiveSystemInstruction.isBlank()
+									? effectiveSystemInstruction.substring(0,
+											Math.min(200, effectiveSystemInstruction.length())) + "..."
+									: "null 또는 빈 문자열");
 					// 하이브리드 검색: 상담 10건 + 법령 10건 + 연관 법령 (systemInstruction으로 쿼리 보강)
 					var searchResults = consultationSearchService.hybridSearch(userPrompt, 10, 10, 0.6,
 							effectiveSystemInstruction);
@@ -300,9 +304,21 @@ public class GeminiTextService {
 						long lawArticleCount = searchResults.stream()
 								.filter(r -> "lawArticle".equals(r.getDocumentType()))
 								.count();
-						log.info("검색 결과 분류 - 상담: {}건, 법령: {}건, 전체: {}건", 
+						log.info("검색 결과 분류 - 상담: {}건, 법령: {}건, 전체: {}건",
 								counselCount, lawArticleCount, searchResults.size());
-						
+
+						// 상담 사례 인덱스 -> counselId 맵 생성 (1-based 인덱스)
+						List<SearchResult> counselResults = searchResults.stream()
+								.filter(r -> "counsel".equals(r.getDocumentType()))
+								.toList();
+						for (int i = 0; i < counselResults.size(); i++) {
+							SearchResult result = counselResults.get(i);
+							if (result.getCounselId() != null) {
+								counselIndexToIdMap.put(i + 1, result.getCounselId());
+							}
+						}
+						log.info("상담 사례 링크 변환 맵 생성 완료 - {}건", counselIndexToIdMap.size());
+
 						searchContext = formatSearchResultsForContext(searchResults);
 						log.info("하이브리드 벡터 검색 완료 - {}건의 결과를 컨텍스트로 추가", searchResults.size());
 					} else {
@@ -325,9 +341,9 @@ public class GeminiTextService {
 
 				// 전송되는 메시지 확인을 위한 로깅
 				log.info("=== 전송되는 메시지 확인 ===");
-				log.info("원본 systemInstruction 존재 여부: {}", 
+				log.info("원본 systemInstruction 존재 여부: {}",
 						systemInstruction != null && !systemInstruction.isBlank() ? "있음" : "없음");
-				log.info("사용된 systemInstruction (기본값 포함): {}", 
+				log.info("사용된 systemInstruction (기본값 포함): {}",
 						effectiveSystemInstruction != null && !effectiveSystemInstruction.isBlank() ? "있음" : "없음");
 				log.info("최종 SystemMessage 길이: {}자", finalSystemInstruction.length());
 				log.info("최종 SystemMessage 내용 (처음 500자): {}",
@@ -384,18 +400,21 @@ public class GeminiTextService {
 										return;
 									}
 
-									// 델타만 추출 (현재 텍스트에서 이전 텍스트 제거)
+									// 상담 사례 참조를 링크로 변환
+									String convertedText = convertCounselReferencesToLinks(currentText, counselIndexToIdMap);
+
+									// 델타만 추출 (변환된 텍스트에서 이전 텍스트 제거)
 									String previous = previousText.get();
-									String delta = currentText;
-									if (currentText.startsWith(previous)) {
-										delta = currentText.substring(previous.length());
+									String delta = convertedText;
+									if (convertedText.startsWith(previous)) {
+										delta = convertedText.substring(previous.length());
 									}
 
 									if (!delta.isEmpty()) {
 										emitter.send(SseEmitter.event()
 												.name("message")
 												.data(delta));
-										previousText.set(currentText);
+										previousText.set(convertedText);
 									}
 								} catch (IOException e) {
 									log.error("스트리밍 청크 전송 중 오류", e);
@@ -441,8 +460,7 @@ public class GeminiTextService {
 									() -> {
 										// 완료 처리 (doOnComplete에서 이미 처리)
 										log.debug("스트리밍 Flux 구독 완료");
-									}
-							);
+									});
 				} else {
 					// 스트리밍 미지원 - 일반 호출 사용
 					log.warn("ChatModel이 StreamingChatModel을 구현하지 않음. 일반 호출 사용");
@@ -451,6 +469,8 @@ public class GeminiTextService {
 
 					String content = response.getResult().getOutput().getText();
 					if (content != null && !content.isEmpty()) {
+						// 상담 사례 참조를 링크로 변환
+						content = convertCounselReferencesToLinks(content, counselIndexToIdMap);
 						emitter.send(SseEmitter.event()
 								.name("message")
 								.data(content));
@@ -510,12 +530,12 @@ public class GeminiTextService {
 		List<SearchResult> lawArticleResults = results.stream()
 				.filter(r -> "lawArticle".equals(r.getDocumentType()))
 				.toList();
-		
+
 		// 디버깅: documentType 확인
-		log.info("formatSearchResultsForContext - 전체 결과: {}건, 상담: {}건, 법령: {}건", 
+		log.info("formatSearchResultsForContext - 전체 결과: {}건, 상담: {}건, 법령: {}건",
 				results.size(), counselResults.size(), lawArticleResults.size());
 		if (!lawArticleResults.isEmpty()) {
-			log.info("법령 결과 상세 - 첫 번째 법령 documentType: {}, title: {}", 
+			log.info("법령 결과 상세 - 첫 번째 법령 documentType: {}, title: {}",
 					lawArticleResults.get(0).getDocumentType(),
 					lawArticleResults.get(0).getTitle());
 		}
@@ -525,7 +545,7 @@ public class GeminiTextService {
 				.toList();
 		if (!otherResults.isEmpty()) {
 			log.warn("알 수 없는 documentType 결과: {}건", otherResults.size());
-			otherResults.forEach(r -> log.warn("  - documentType: {}, title: {}", 
+			otherResults.forEach(r -> log.warn("  - documentType: {}, title: {}",
 					r.getDocumentType(), r.getTitle()));
 		}
 
@@ -533,7 +553,15 @@ public class GeminiTextService {
 			sb.append("\n=== 관련 상담 사례 ===\n");
 			for (int i = 0; i < counselResults.size(); i++) {
 				var result = counselResults.get(i);
-				sb.append("\n[상담 사례 ").append(i + 1).append("]\n");
+
+				// 상담 사례 제목에 링크 추가 (counselId가 있는 경우)
+				if (result.getCounselId() != null) {
+					String link = String.format("https://beta.taxnet.co.kr/counsel/counsel/counsel-detail?id=%d",
+							result.getCounselId());
+					sb.append("\n[상담 사례 ").append(i + 1).append("](").append(link).append(")\n");
+				} else {
+					sb.append("\n[상담 사례 ").append(i + 1).append("]\n");
+				}
 
 				if (result.getTitle() != null) {
 					sb.append("제목: ").append(result.getTitle()).append("\n");
@@ -603,6 +631,59 @@ public class GeminiTextService {
 	}
 
 	/**
+	 * 텍스트 내의 "(상담 사례 X)" 패턴을 링크로 변환합니다.
+	 * 이미 링크 형식인 경우는 변환하지 않습니다.
+	 * 
+	 * 다양한 변형을 처리합니다:
+	 * - "(상담 사례 2)"
+	 * - "(상담사례 2)"
+	 * - "(상담 사례2)"
+	 * - "(상담사례2)"
+	 * 
+	 * @param text 변환할 텍스트
+	 * @param counselIndexToIdMap 상담 사례 인덱스(1-based) -> counselId 맵
+	 * @return 변환된 텍스트
+	 */
+	private String convertCounselReferencesToLinks(String text, java.util.Map<Integer, Long> counselIndexToIdMap) {
+		if (text == null || text.isEmpty() || counselIndexToIdMap.isEmpty()) {
+			return text;
+		}
+
+		// "(상담 사례 X)" 패턴을 찾아서 링크로 변환
+		// 공백이 있거나 없거나, 숫자 앞에 공백이 있거나 없거나 모두 처리
+		// 이미 링크 형식인 경우는 변환하지 않음 (예: [상담 사례 1](링크))
+		// 패턴: (상담[공백]사례[공백]숫자) 또는 (상담사례[공백]숫자) 등
+		java.util.regex.Pattern pattern = java.util.regex.Pattern.compile(
+				"\\(상담\\s*사례\\s*(\\d+)\\)(?![^\\[]*\\])");
+		java.util.regex.Matcher matcher = pattern.matcher(text);
+		
+		StringBuffer result = new StringBuffer();
+		while (matcher.find()) {
+			String indexStr = matcher.group(1);
+			try {
+				int index = Integer.parseInt(indexStr);
+				Long counselId = counselIndexToIdMap.get(index);
+				if (counselId != null) {
+					String link = String.format("https://beta.taxnet.co.kr/counsel/counsel/counsel-detail?id=%d",
+							counselId);
+					// 링크 형식으로 변환: [상담 사례 X](링크)
+					String replacement = String.format("[상담 사례 %d](%s)", index, link);
+					matcher.appendReplacement(result, java.util.regex.Matcher.quoteReplacement(replacement));
+				} else {
+					// counselId가 없으면 그대로 유지
+					matcher.appendReplacement(result, matcher.group(0));
+				}
+			} catch (NumberFormatException e) {
+				// 숫자 파싱 실패 시 그대로 유지
+				matcher.appendReplacement(result, matcher.group(0));
+			}
+		}
+		matcher.appendTail(result);
+		
+		return result.toString();
+	}
+
+	/**
 	 * 에러 메시지를 사용자 친화적인 형태로 변환합니다.
 	 * 특히 429 에러(할당량 초과)를 감지하여 적절한 메시지를 반환합니다.
 	 * 
@@ -614,62 +695,62 @@ public class GeminiTextService {
 			return "알 수 없는 오류가 발생했습니다.";
 		}
 
-			// 원인 예외 확인
-			Throwable cause = error.getCause();
-			if (cause != null) {
-				String causeMessage = cause.getMessage();
-				if (causeMessage != null) {
-					// 429 에러 (할당량 초과) 감지
-					if (causeMessage.contains("429") || 
-						causeMessage.contains("quota") || 
+		// 원인 예외 확인
+		Throwable cause = error.getCause();
+		if (cause != null) {
+			String causeMessage = cause.getMessage();
+			if (causeMessage != null) {
+				// 429 에러 (할당량 초과) 감지
+				if (causeMessage.contains("429") ||
+						causeMessage.contains("quota") ||
 						causeMessage.contains("exceeded") ||
 						causeMessage.contains("Quota exceeded")) {
-						
-						// 재시도 시간 추출 (예: "Please retry in 15.011495827s.")
-						String retryMessage = "";
-						java.util.regex.Pattern retryPattern = java.util.regex.Pattern.compile(
-								"Please retry in (\\d+(?:\\.\\d+)?)s?\\.");
-						java.util.regex.Matcher matcher = retryPattern.matcher(causeMessage);
-						if (matcher.find()) {
-							double retrySeconds = Double.parseDouble(matcher.group(1));
-							int retryMinutes = (int) Math.ceil(retrySeconds / 60);
-							if (retryMinutes > 0) {
-								retryMessage = String.format("약 %d분 후 다시 시도해주세요.", retryMinutes);
-							} else {
-								retryMessage = String.format("약 %.0f초 후 다시 시도해주세요.", retrySeconds);
-							}
+
+					// 재시도 시간 추출 (예: "Please retry in 15.011495827s.")
+					String retryMessage = "";
+					java.util.regex.Pattern retryPattern = java.util.regex.Pattern.compile(
+							"Please retry in (\\d+(?:\\.\\d+)?)s?\\.");
+					java.util.regex.Matcher matcher = retryPattern.matcher(causeMessage);
+					if (matcher.find()) {
+						double retrySeconds = Double.parseDouble(matcher.group(1));
+						int retryMinutes = (int) Math.ceil(retrySeconds / 60);
+						if (retryMinutes > 0) {
+							retryMessage = String.format("약 %d분 후 다시 시도해주세요.", retryMinutes);
+						} else {
+							retryMessage = String.format("약 %.0f초 후 다시 시도해주세요.", retrySeconds);
 						}
-						
-						// 제한 정보 추출 (예: "limit: 20")
-						String limitInfo = "";
-						java.util.regex.Pattern limitPattern = java.util.regex.Pattern.compile(
-								"limit: (\\d+)");
-						java.util.regex.Matcher limitMatcher = limitPattern.matcher(causeMessage);
-						if (limitMatcher.find()) {
-							limitInfo = String.format("(시간당 %s회 요청 제한)", limitMatcher.group(1));
-						}
-						
-						String baseMessage = "Gemini API 사용량이 초과되었습니다.";
-						if (!retryMessage.isEmpty()) {
-							baseMessage += " " + retryMessage;
-						}
-						if (!limitInfo.isEmpty()) {
-							baseMessage += " " + limitInfo;
-						}
-						
-						return baseMessage;
 					}
-				
+
+					// 제한 정보 추출 (예: "limit: 20")
+					String limitInfo = "";
+					java.util.regex.Pattern limitPattern = java.util.regex.Pattern.compile(
+							"limit: (\\d+)");
+					java.util.regex.Matcher limitMatcher = limitPattern.matcher(causeMessage);
+					if (limitMatcher.find()) {
+						limitInfo = String.format("(시간당 %s회 요청 제한)", limitMatcher.group(1));
+					}
+
+					String baseMessage = "Gemini API 사용량이 초과되었습니다.";
+					if (!retryMessage.isEmpty()) {
+						baseMessage += " " + retryMessage;
+					}
+					if (!limitInfo.isEmpty()) {
+						baseMessage += " " + limitInfo;
+					}
+
+					return baseMessage;
+				}
+
 				// 기타 API 에러
 				if (causeMessage.contains("401") || causeMessage.contains("403")) {
 					return "Gemini API 인증 오류가 발생했습니다. API 키를 확인해주세요.";
 				}
-				
+
 				if (causeMessage.contains("500") || causeMessage.contains("503")) {
 					return "Gemini API 서버 오류가 발생했습니다. 잠시 후 다시 시도해주세요.";
 				}
 			}
-			
+
 			// ClientException 확인
 			if (cause.getClass().getSimpleName().contains("ClientException")) {
 				return "Gemini API 호출 중 오류가 발생했습니다: " + cause.getMessage();

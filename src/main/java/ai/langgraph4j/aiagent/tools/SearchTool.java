@@ -126,7 +126,14 @@ public class SearchTool {
 	 * @param isCounsel 상담 결과 여부
 	 */
 	private void formatSearchResult(StringBuilder sb, int index, SearchResult result, boolean isCounsel) {
-		sb.append("[").append(index).append("] ");
+		// 상담 결과인 경우 링크 추가
+		if (isCounsel && result.getCounselId() != null) {
+			String link = String.format("https://beta.taxnet.co.kr/counsel/counsel/counsel-detail?id=%d", 
+					result.getCounselId());
+			sb.append("[").append(index).append("](").append(link).append(") ");
+		} else {
+			sb.append("[").append(index).append("] ");
+		}
 
 		if (result.getTitle() != null) {
 			sb.append("제목: ").append(result.getTitle()).append("\n");

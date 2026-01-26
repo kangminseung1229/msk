@@ -215,26 +215,52 @@ public class LlmNode {
 				// 스트리밍 응답 수집
 				AtomicReference<StringBuilder> fullResponse = new AtomicReference<>(new StringBuilder());
 				AtomicReference<ChatResponse> lastResponse = new AtomicReference<>();
+				// 이전 텍스트를 추적하여 델타만 전송 (중복 전송 방지)
+				AtomicReference<String> previousText = new AtomicReference<>("");
 
 				Flux<ChatResponse> responseFlux = streamingChatModel.stream(prompt);
 
 				// 스트리밍 응답 처리
+				// 각 청크는 doOnNext에서 즉시 SSE로 전송되므로 스트리밍이 정상 작동합니다.
+				// blockLast()는 스트리밍 완료까지 대기하지만, 각 청크는 즉시 전송됩니다.
 				responseFlux
 						.doOnNext(chatResponse -> {
 							try {
-								String content = chatResponse.getResult().getOutput().getText();
-								if (content != null && !content.isEmpty()) {
-									// 전체 응답 누적
-									fullResponse.get().append(content);
-									lastResponse.set(chatResponse);
+								// ChatResponse 검증
+								if (chatResponse == null || chatResponse.getResult() == null 
+										|| chatResponse.getResult().getOutput() == null) {
+									log.debug("LlmNode: 스트리밍 응답에 result 또는 output이 없습니다 (Tool 호출 중이거나 중간 응답일 수 있음)");
+									return;
+								}
 
-									// SSE로 청크 전송
+								String currentText = chatResponse.getResult().getOutput().getText();
+								if (currentText == null || currentText.isEmpty()) {
+									log.debug("LlmNode: 스트리밍 응답에 텍스트가 없습니다 (중간 응답일 수 있음)");
+									return;
+								}
+
+								// 전체 응답 누적
+								fullResponse.get().append(currentText);
+								lastResponse.set(chatResponse);
+
+								// 델타만 추출 (현재 텍스트에서 이전 텍스트 제거하여 중복 전송 방지)
+								String previous = previousText.get();
+								String delta = currentText;
+								if (currentText.startsWith(previous)) {
+									delta = currentText.substring(previous.length());
+								}
+
+								// 델타가 있으면 SSE로 즉시 전송 (버퍼링 없이)
+								if (!delta.isEmpty()) {
 									emitter.send(SseEmitter.event()
 											.name("chunk")
-											.data(content));
+											.data(delta));
+									previousText.set(currentText);
 								}
 							} catch (IOException e) {
 								log.error("LlmNode: 스트리밍 청크 전송 중 오류", e);
+							} catch (Exception e) {
+								log.error("LlmNode: 스트리밍 응답 처리 중 오류 발생 (계속 진행)", e);
 							}
 						})
 						.doOnError(error -> {
@@ -248,7 +274,7 @@ public class LlmNode {
 							}
 						})
 						.doOnComplete(() -> log.debug("LlmNode: 스트리밍 완료"))
-						.blockLast(); // 스트리밍 완료까지 대기
+						.blockLast(); // 스트리밍 완료까지 대기 (각 청크는 doOnNext에서 즉시 전송됨)
 
 				// 최종 응답 설정
 				String finalContent = fullResponse.get().toString();
