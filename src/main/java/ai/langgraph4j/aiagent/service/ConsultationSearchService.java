@@ -13,6 +13,7 @@ import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import ai.langgraph4j.aiagent.config.PromptConfig;
 import ai.langgraph4j.aiagent.service.dto.SearchResult;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -27,6 +28,7 @@ import lombok.extern.slf4j.Slf4j;
 public class ConsultationSearchService {
 
 	private final VectorStore vectorStore;
+	private final PromptConfig promptConfig;
 
 	/**
 	 * 벡터 유사도 검색 수행
@@ -156,15 +158,35 @@ public class ConsultationSearchService {
 	 * 
 	 * @param query               검색 쿼리
 	 * @param counselTopK         상담 데이터 검색 결과 수
-	 * @param lawArticleTopK     법령 데이터 검색 결과 수
+	 * @param lawArticleTopK      법령 데이터 검색 결과 수
 	 * @param similarityThreshold 유사도 임계값
 	 * @return 통합 검색 결과 리스트
 	 */
 	@Transactional(readOnly = true)
 	public List<SearchResult> hybridSearch(String query, int counselTopK, int lawArticleTopK,
 			double similarityThreshold) {
-		log.info("하이브리드 검색 시작 - query: {}, counselTopK: {}, lawArticleTopK: {}, threshold: {}", query,
-				counselTopK, lawArticleTopK, similarityThreshold);
+		return hybridSearch(query, counselTopK, lawArticleTopK, similarityThreshold, null);
+	}
+
+	/**
+	 * 하이브리드 검색: 상담 데이터와 법령 데이터를 병렬로 검색하고, 상담 결과의 lawArticles로 추가 검색.
+	 * systemInstruction이 있으면 검색 쿼리와 결합하여 벡터 검색에 반영합니다.
+	 * 
+	 * @param query               검색 쿼리
+	 * @param counselTopK         상담 데이터 검색 결과 수
+	 * @param lawArticleTopK      법령 데이터 검색 결과 수
+	 * @param similarityThreshold 유사도 임계값
+	 * @param systemInstruction   검색 맥락 보강용 (선택, null 가능)
+	 * @return 통합 검색 결과 리스트
+	 */
+	@Transactional(readOnly = true)
+	public List<SearchResult> hybridSearch(String query, int counselTopK, int lawArticleTopK,
+			double similarityThreshold, String systemInstruction) {
+		String effectiveQuery = buildSearchQuery(query, systemInstruction);
+		log.info(
+				"하이브리드 검색 시작 - query: {}, systemInstruction 적용: {}, counselTopK: {}, lawArticleTopK: {}, threshold: {}",
+				query, systemInstruction != null && !systemInstruction.isBlank(), counselTopK, lawArticleTopK,
+				similarityThreshold);
 
 		if (query == null || query.trim().isEmpty()) {
 			log.warn("검색 쿼리가 비어있습니다");
@@ -174,7 +196,7 @@ public class ConsultationSearchService {
 		try {
 			// 1단계: 상담 데이터 검색 (documentType == 'counsel')
 			SearchRequest counselSearchRequest = SearchRequest.builder()
-					.query(query)
+					.query(effectiveQuery)
 					.topK(counselTopK)
 					.similarityThreshold(similarityThreshold)
 					.filterExpression("documentType == 'counsel'")
@@ -187,7 +209,7 @@ public class ConsultationSearchService {
 			// 법령 데이터는 상담 데이터보다 유사도 점수가 낮을 수 있으므로 임계값을 낮춤
 			double lawArticleThreshold = Math.max(0.0, similarityThreshold - 0.1); // 최소 0.1 낮춤
 			SearchRequest lawArticleSearchRequest = SearchRequest.builder()
-					.query(query)
+					.query(effectiveQuery)
 					.topK(lawArticleTopK)
 					.similarityThreshold(lawArticleThreshold)
 					.filterExpression("documentType == 'lawArticle'")
@@ -195,16 +217,16 @@ public class ConsultationSearchService {
 
 			List<Document> lawArticleDocuments = vectorStore.similaritySearch(lawArticleSearchRequest);
 			log.info("법령 데이터 검색 완료 - 결과 수: {} (임계값: {})", lawArticleDocuments.size(), lawArticleThreshold);
-			
+
 			// 검색 결과가 없을 때 디버깅 정보 출력
 			if (lawArticleDocuments.isEmpty()) {
 				log.warn("법령 데이터 검색 결과가 없습니다. " +
 						"벡터 스토어에 법령 데이터가 없거나, 유사도 임계값({})이 너무 높을 수 있습니다.", lawArticleThreshold);
-				
+
 				// 필터 없이 검색해보기 (디버깅용)
 				try {
 					SearchRequest debugRequest = SearchRequest.builder()
-							.query(query)
+							.query(effectiveQuery)
 							.topK(5)
 							.similarityThreshold(0.0)
 							.filterExpression("documentType == 'lawArticle'")
@@ -235,11 +257,12 @@ public class ConsultationSearchService {
 				log.info("상담 결과에서 추출한 lawArticlePairs: {}개", foundLawArticlePairs.size());
 				// 연관 법령 조문 검색 시에도 임계값을 낮춤
 				double relatedLawArticleThreshold = Math.max(0.0, similarityThreshold - 0.1);
-				relatedLawArticleDocuments = searchLawArticlesByPairs(query, foundLawArticlePairs, lawArticleTopK,
+				relatedLawArticleDocuments = searchLawArticlesByPairs(effectiveQuery, foundLawArticlePairs,
+						lawArticleTopK,
 						relatedLawArticleThreshold);
-				log.info("연관 법령 조문 검색 완료 - 결과 수: {} (임계값: {})", 
+				log.info("연관 법령 조문 검색 완료 - 결과 수: {} (임계값: {})",
 						relatedLawArticleDocuments.size(), relatedLawArticleThreshold);
-				
+
 				// 검색 결과가 없을 때 디버깅 정보 출력
 				if (relatedLawArticleDocuments.isEmpty()) {
 					log.warn("연관 법령 조문 검색 결과가 없습니다. " +
@@ -257,31 +280,62 @@ public class ConsultationSearchService {
 			}
 
 			// 법령 결과 추가 (중복 제거)
+			int addedLawArticles = 0;
 			for (Document doc : lawArticleDocuments) {
 				Map<String, Object> meta = doc.getMetadata();
 				String lawId = extractString(meta, "lawId");
 				String articleKey = extractString(meta, "articleKey");
+				String documentType = extractString(meta, "documentType");
 				String key = "lawArticle:" + lawId + ":" + articleKey;
+				log.debug("법령 검색 결과 처리 - lawId: {}, articleKey: {}, documentType: {}, key: {}", 
+						lawId, articleKey, documentType, key);
 				if (!resultMap.containsKey(key)) {
 					SearchResult result = convertLawArticleToSearchResult(doc);
+					log.debug("법령 결과 추가 - documentType: {}, title: {}", 
+							result.getDocumentType(), result.getTitle());
 					resultMap.put(key, result);
+					addedLawArticles++;
+				} else {
+					log.debug("법령 결과 중복 제거됨 - key: {}", key);
 				}
 			}
+			log.info("법령 검색 결과 추가 완료 - {}건 추가됨 (전체 법령 검색 결과: {}건)", 
+					addedLawArticles, lawArticleDocuments.size());
 
 			// 연관 법령 결과 추가 (중복 제거)
+			int addedRelatedLawArticles = 0;
 			for (Document doc : relatedLawArticleDocuments) {
 				Map<String, Object> meta = doc.getMetadata();
 				String lawId = extractString(meta, "lawId");
 				String articleKey = extractString(meta, "articleKey");
+				String documentType = extractString(meta, "documentType");
 				String key = "lawArticle:" + lawId + ":" + articleKey;
+				log.debug("연관 법령 검색 결과 처리 - lawId: {}, articleKey: {}, documentType: {}, key: {}", 
+						lawId, articleKey, documentType, key);
 				if (!resultMap.containsKey(key)) {
 					SearchResult result = convertLawArticleToSearchResult(doc);
+					log.debug("연관 법령 결과 추가 - documentType: {}, title: {}", 
+							result.getDocumentType(), result.getTitle());
 					resultMap.put(key, result);
+					addedRelatedLawArticles++;
+				} else {
+					log.debug("연관 법령 결과 중복 제거됨 - key: {}", key);
 				}
 			}
+			log.info("연관 법령 검색 결과 추가 완료 - {}건 추가됨 (전체 연관 법령 검색 결과: {}건)", 
+					addedRelatedLawArticles, relatedLawArticleDocuments.size());
 
 			List<SearchResult> results = new ArrayList<>(resultMap.values());
-			log.info("하이브리드 검색 완료 - 통합 결과 수: {}", results.size());
+			
+			// 최종 결과 분류 확인
+			long finalCounselCount = results.stream()
+					.filter(r -> "counsel".equals(r.getDocumentType()))
+					.count();
+			long finalLawArticleCount = results.stream()
+					.filter(r -> "lawArticle".equals(r.getDocumentType()))
+					.count();
+			log.info("하이브리드 검색 완료 - 통합 결과 수: {} (상담: {}건, 법령: {}건)", 
+					results.size(), finalCounselCount, finalLawArticleCount);
 
 			return results;
 
@@ -289,6 +343,19 @@ public class ConsultationSearchService {
 			log.error("하이브리드 검색 중 오류 발생 - query: {}", query, e);
 			throw new SearchException("하이브리드 검색 중 오류가 발생했습니다: " + e.getMessage(), e);
 		}
+	}
+
+	/**
+	 * 검색 쿼리와 systemInstruction을 결합하여 벡터 검색용 쿼리를 만듭니다.
+	 * systemInstruction이 null이거나 공백이면 query만 사용합니다.
+	 * 보강 문구는 {@link PromptConfig#getSearchQueryContextPrefix()}에서 로드합니다.
+	 */
+	private String buildSearchQuery(String query, String systemInstruction) {
+		if (systemInstruction == null || systemInstruction.isBlank()) {
+			return query;
+		}
+		String prefix = promptConfig.getSearchQueryContextPrefix();
+		return query + "\n\n" + prefix + " " + systemInstruction.trim();
 	}
 
 	/**
@@ -324,16 +391,48 @@ public class ConsultationSearchService {
 
 			try {
 				// 벡터 유사도 검색 (메타데이터 필터와 함께)
+				// 메타데이터 필터로 정확히 매칭되는 법령 조문을 찾는 것이므로,
+				// 유사도 임계값을 낮춰서 필터 조건만으로도 결과가 나오도록 함
+				double effectiveThreshold = Math.max(0.0, similarityThreshold - 0.2);
 				SearchRequest searchRequest = SearchRequest.builder()
 						.query(query) // 실제 검색 쿼리 사용
 						.topK(topK)
-						.similarityThreshold(similarityThreshold)
+						.similarityThreshold(effectiveThreshold)
 						.filterExpression(
 								String.format("documentType == 'lawArticle' && lawId == '%s' && articleKey == '%s'",
 										lawId, articleKey))
 						.build();
 
+				log.debug("연관 법령 조문 검색 - lawId: {}, articleKey: {}, 임계값: {} -> {}", 
+						lawId, articleKey, similarityThreshold, effectiveThreshold);
 				List<Document> documents = vectorStore.similaritySearch(searchRequest);
+				log.debug("연관 법령 조문 검색 결과 - lawId: {}, articleKey: {}, 결과 수: {}", 
+						lawId, articleKey, documents.size());
+				if (!documents.isEmpty()) {
+					log.info("연관 법령 조문 검색 성공 - lawId: {}, articleKey: {}, 유사도 점수: {}", 
+							lawId, articleKey, documents.get(0).getScore());
+				} else {
+					log.warn("연관 법령 조문 검색 실패 - lawId: {}, articleKey: {}, 임계값: {}", 
+							lawId, articleKey, effectiveThreshold);
+					// 임계값을 0으로 낮춰서 다시 시도
+					SearchRequest retryRequest = SearchRequest.builder()
+							.query(query)
+							.topK(topK)
+							.similarityThreshold(0.0)
+							.filterExpression(
+									String.format("documentType == 'lawArticle' && lawId == '%s' && articleKey == '%s'",
+											lawId, articleKey))
+							.build();
+					List<Document> retryDocuments = vectorStore.similaritySearch(retryRequest);
+					if (!retryDocuments.isEmpty()) {
+						log.info("연관 법령 조문 검색 재시도 성공 - lawId: {}, articleKey: {}, 유사도 점수: {}", 
+								lawId, articleKey, retryDocuments.get(0).getScore());
+						allResults.addAll(retryDocuments);
+					} else {
+						log.warn("연관 법령 조문 검색 재시도 실패 - lawId: {}, articleKey: {}, 벡터 스토어에 해당 법령 조문이 없을 수 있습니다", 
+								lawId, articleKey);
+					}
+				}
 				allResults.addAll(documents);
 
 			} catch (Exception e) {
@@ -408,6 +507,9 @@ public class ConsultationSearchService {
 		Integer chunkIndex = extractInteger(metadata, "chunkIndex");
 		Integer totalChunks = extractInteger(metadata, "totalChunks");
 		String documentType = extractString(metadata, "documentType");
+		
+		log.debug("convertLawArticleToSearchResult - lawId: {}, articleKey: {}, documentType: {}", 
+				lawId, articleKey, documentType);
 
 		// 유사도 점수 추출
 		Double similarityScore = document.getScore();
@@ -518,7 +620,7 @@ public class ConsultationSearchService {
 				// 법령 조문 정보 구성
 				SearchResult.LawArticleInfo lawArticleInfo = SearchResult.LawArticleInfo.builder()
 						.lawId(extractString(lawArticleMeta, "lawId"))
-						.lawNameKorean(extractString(lawArticleMeta, "lawNameKorean")) 
+						.lawNameKorean(extractString(lawArticleMeta, "lawNameKorean"))
 						.articleKey(extractString(lawArticleMeta, "articleKey"))
 						.articleKoreanString(extractString(lawArticleMeta, "articleKoreanString"))
 						.articleTitle(extractString(lawArticleMeta, "articleTitle"))

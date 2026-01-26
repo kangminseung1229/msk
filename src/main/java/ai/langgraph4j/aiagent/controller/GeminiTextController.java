@@ -145,8 +145,17 @@ public class GeminiTextController {
 		String userPrompt = request.getUserPrompt();
 		String model = request.getModel();
 
-		log.info("스트리밍 요청 - systemInstruction: {}, userPrompt: {}, model: {}",
-				systemInstruction, userPrompt, model);
+		log.info("=== Controller에서 받은 요청 ===");
+		log.info("systemInstruction: {}", 
+				systemInstruction != null && !systemInstruction.isBlank() 
+					? systemInstruction.substring(0, Math.min(200, systemInstruction.length())) + "..." 
+					: "null 또는 빈 문자열");
+		log.info("systemInstruction 존재 여부: {}", 
+				systemInstruction != null && !systemInstruction.isBlank() ? "있음" : "없음");
+		log.info("userPrompt: {}", userPrompt);
+		log.info("model: {}", model);
+		log.info("=== Controller 요청 확인 완료 ===");
+		
 		return geminiTextService.streamingSse(systemInstruction, userPrompt, model);
 	}
 

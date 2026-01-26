@@ -26,6 +26,7 @@ import com.google.genai.types.Part;
 import com.google.genai.types.ThinkingConfig;
 import com.google.genai.types.ThinkingLevel;
 
+import ai.langgraph4j.aiagent.config.PromptConfig;
 import ai.langgraph4j.aiagent.service.dto.SearchResult;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -46,6 +47,7 @@ public class GeminiTextService {
 	private final Client client;
 	private final ChatModel chatModel;
 	private final ConsultationSearchService consultationSearchService;
+	private final PromptConfig promptConfig;
 
 	/**
 	 * 텍스트 입력을 받아 Gemini API로 응답을 생성합니다.
@@ -269,14 +271,38 @@ public class GeminiTextService {
 
 		CompletableFuture.runAsync(() -> {
 			try {
+				// systemInstruction이 null이거나 빈 문자열이면 search-query-context.txt의 내용을 기본값으로 사용
+				String effectiveSystemInstruction = systemInstruction;
+				if (effectiveSystemInstruction == null || effectiveSystemInstruction.isBlank()) {
+					effectiveSystemInstruction = promptConfig.getSearchQueryContextPrefix();
+					log.info("systemInstruction이 없어서 search-query-context.txt의 내용을 기본값으로 사용: {}",
+							effectiveSystemInstruction.substring(0, Math.min(200, effectiveSystemInstruction.length())) + "...");
+				}
+				
 				// RAG 패턴: 하이브리드 벡터 검색 (상담 데이터 + 법령 데이터)
 				String searchContext = "";
 				try {
-					log.info("하이브리드 벡터 검색 시작 - query: {}", userPrompt);
-					// 하이브리드 검색: 상담 10건 + 법령 10건 + 연관 법령
-					var searchResults = consultationSearchService.hybridSearch(userPrompt, 10, 10, 0.6);
+					log.info("하이브리드 벡터 검색 시작 - query: {}, systemInstruction 적용: {}",
+							userPrompt, effectiveSystemInstruction != null && !effectiveSystemInstruction.isBlank());
+					log.info("사용할 systemInstruction: {}", 
+							effectiveSystemInstruction != null && !effectiveSystemInstruction.isBlank() 
+								? effectiveSystemInstruction.substring(0, Math.min(200, effectiveSystemInstruction.length())) + "..." 
+								: "null 또는 빈 문자열");
+					// 하이브리드 검색: 상담 10건 + 법령 10건 + 연관 법령 (systemInstruction으로 쿼리 보강)
+					var searchResults = consultationSearchService.hybridSearch(userPrompt, 10, 10, 0.6,
+							effectiveSystemInstruction);
 
 					if (!searchResults.isEmpty()) {
+						// 검색 결과의 documentType 확인
+						long counselCount = searchResults.stream()
+								.filter(r -> "counsel".equals(r.getDocumentType()))
+								.count();
+						long lawArticleCount = searchResults.stream()
+								.filter(r -> "lawArticle".equals(r.getDocumentType()))
+								.count();
+						log.info("검색 결과 분류 - 상담: {}건, 법령: {}건, 전체: {}건", 
+								counselCount, lawArticleCount, searchResults.size());
+						
 						searchContext = formatSearchResultsForContext(searchResults);
 						log.info("하이브리드 벡터 검색 완료 - {}건의 결과를 컨텍스트로 추가", searchResults.size());
 					} else {
@@ -291,10 +317,26 @@ public class GeminiTextService {
 				List<Message> messages = new ArrayList<>();
 
 				// System Instruction 구성 (벡터 검색 결과 포함)
-				String finalSystemInstruction = buildSystemInstruction(systemInstruction, searchContext);
+				// effectiveSystemInstruction 사용 (기본값이 적용된 systemInstruction)
+				String finalSystemInstruction = buildSystemInstruction(effectiveSystemInstruction, searchContext);
 				messages.add(new SystemMessage(finalSystemInstruction));
 
 				messages.add(new UserMessage(userPrompt));
+
+				// 전송되는 메시지 확인을 위한 로깅
+				log.info("=== 전송되는 메시지 확인 ===");
+				log.info("원본 systemInstruction 존재 여부: {}", 
+						systemInstruction != null && !systemInstruction.isBlank() ? "있음" : "없음");
+				log.info("사용된 systemInstruction (기본값 포함): {}", 
+						effectiveSystemInstruction != null && !effectiveSystemInstruction.isBlank() ? "있음" : "없음");
+				log.info("최종 SystemMessage 길이: {}자", finalSystemInstruction.length());
+				log.info("최종 SystemMessage 내용 (처음 500자): {}",
+						finalSystemInstruction.length() > 500
+								? finalSystemInstruction.substring(0, 500) + "..."
+								: finalSystemInstruction);
+				log.info("UserMessage: {}", userPrompt);
+				log.info("전체 메시지 개수: {}", messages.size());
+				log.info("=== 메시지 확인 완료 ===");
 
 				// Spring AI ChatModel이 StreamingChatModel을 구현하는지 확인
 				if (chatModel instanceof StreamingChatModel) {
@@ -305,8 +347,8 @@ public class GeminiTextService {
 					Flux<ChatResponse> responseFlux = streamingChatModel.stream(prompt);
 
 					// 이전 텍스트를 추적하여 델타만 전송
-					java.util.concurrent.atomic.AtomicReference<String> previousText = 
-							new java.util.concurrent.atomic.AtomicReference<>("");
+					java.util.concurrent.atomic.AtomicReference<String> previousText = new java.util.concurrent.atomic.AtomicReference<>(
+							"");
 
 					responseFlux
 							.doOnNext(chatResponse -> {
@@ -369,18 +411,6 @@ public class GeminiTextService {
 									}
 								}
 							})
-							.doOnError(error -> {
-								log.error("스트리밍 중 오류 발생", error);
-								try {
-									emitter.send(SseEmitter.event()
-											.name("error")
-											.data("스트리밍 중 오류가 발생했습니다: " + error.getMessage()));
-									emitter.completeWithError(error);
-								} catch (IOException e) {
-									log.error("에러 이벤트 전송 중 오류", e);
-									emitter.completeWithError(error);
-								}
-							})
 							.doOnComplete(() -> {
 								try {
 									emitter.send(SseEmitter.event()
@@ -392,7 +422,27 @@ public class GeminiTextService {
 									emitter.completeWithError(e);
 								}
 							})
-							.blockLast(); // 스트리밍 완료까지 대기
+							.subscribe(
+									null, // onNext는 이미 doOnNext에서 처리
+									error -> {
+										// 에러 처리
+										log.error("스트리밍 Flux 구독 중 오류 발생", error);
+										String errorMessage = getErrorMessage(error);
+										try {
+											emitter.send(SseEmitter.event()
+													.name("error")
+													.data(errorMessage));
+											emitter.complete();
+										} catch (IOException e) {
+											log.error("에러 이벤트 전송 중 오류", e);
+											emitter.completeWithError(error);
+										}
+									},
+									() -> {
+										// 완료 처리 (doOnComplete에서 이미 처리)
+										log.debug("스트리밍 Flux 구독 완료");
+									}
+							);
 				} else {
 					// 스트리밍 미지원 - 일반 호출 사용
 					log.warn("ChatModel이 StreamingChatModel을 구현하지 않음. 일반 호출 사용");
@@ -460,6 +510,24 @@ public class GeminiTextService {
 		List<SearchResult> lawArticleResults = results.stream()
 				.filter(r -> "lawArticle".equals(r.getDocumentType()))
 				.toList();
+		
+		// 디버깅: documentType 확인
+		log.info("formatSearchResultsForContext - 전체 결과: {}건, 상담: {}건, 법령: {}건", 
+				results.size(), counselResults.size(), lawArticleResults.size());
+		if (!lawArticleResults.isEmpty()) {
+			log.info("법령 결과 상세 - 첫 번째 법령 documentType: {}, title: {}", 
+					lawArticleResults.get(0).getDocumentType(),
+					lawArticleResults.get(0).getTitle());
+		}
+		// documentType이 다른 결과 확인
+		List<SearchResult> otherResults = results.stream()
+				.filter(r -> !"counsel".equals(r.getDocumentType()) && !"lawArticle".equals(r.getDocumentType()))
+				.toList();
+		if (!otherResults.isEmpty()) {
+			log.warn("알 수 없는 documentType 결과: {}건", otherResults.size());
+			otherResults.forEach(r -> log.warn("  - documentType: {}, title: {}", 
+					r.getDocumentType(), r.getTitle()));
+		}
 
 		if (!counselResults.isEmpty()) {
 			sb.append("\n=== 관련 상담 사례 ===\n");
@@ -532,6 +600,89 @@ public class GeminiTextService {
 		}
 
 		return sb.toString();
+	}
+
+	/**
+	 * 에러 메시지를 사용자 친화적인 형태로 변환합니다.
+	 * 특히 429 에러(할당량 초과)를 감지하여 적절한 메시지를 반환합니다.
+	 * 
+	 * @param error 발생한 예외
+	 * @return 사용자 친화적인 에러 메시지
+	 */
+	private String getErrorMessage(Throwable error) {
+		if (error == null) {
+			return "알 수 없는 오류가 발생했습니다.";
+		}
+
+			// 원인 예외 확인
+			Throwable cause = error.getCause();
+			if (cause != null) {
+				String causeMessage = cause.getMessage();
+				if (causeMessage != null) {
+					// 429 에러 (할당량 초과) 감지
+					if (causeMessage.contains("429") || 
+						causeMessage.contains("quota") || 
+						causeMessage.contains("exceeded") ||
+						causeMessage.contains("Quota exceeded")) {
+						
+						// 재시도 시간 추출 (예: "Please retry in 15.011495827s.")
+						String retryMessage = "";
+						java.util.regex.Pattern retryPattern = java.util.regex.Pattern.compile(
+								"Please retry in (\\d+(?:\\.\\d+)?)s?\\.");
+						java.util.regex.Matcher matcher = retryPattern.matcher(causeMessage);
+						if (matcher.find()) {
+							double retrySeconds = Double.parseDouble(matcher.group(1));
+							int retryMinutes = (int) Math.ceil(retrySeconds / 60);
+							if (retryMinutes > 0) {
+								retryMessage = String.format("약 %d분 후 다시 시도해주세요.", retryMinutes);
+							} else {
+								retryMessage = String.format("약 %.0f초 후 다시 시도해주세요.", retrySeconds);
+							}
+						}
+						
+						// 제한 정보 추출 (예: "limit: 20")
+						String limitInfo = "";
+						java.util.regex.Pattern limitPattern = java.util.regex.Pattern.compile(
+								"limit: (\\d+)");
+						java.util.regex.Matcher limitMatcher = limitPattern.matcher(causeMessage);
+						if (limitMatcher.find()) {
+							limitInfo = String.format("(시간당 %s회 요청 제한)", limitMatcher.group(1));
+						}
+						
+						String baseMessage = "Gemini API 사용량이 초과되었습니다.";
+						if (!retryMessage.isEmpty()) {
+							baseMessage += " " + retryMessage;
+						}
+						if (!limitInfo.isEmpty()) {
+							baseMessage += " " + limitInfo;
+						}
+						
+						return baseMessage;
+					}
+				
+				// 기타 API 에러
+				if (causeMessage.contains("401") || causeMessage.contains("403")) {
+					return "Gemini API 인증 오류가 발생했습니다. API 키를 확인해주세요.";
+				}
+				
+				if (causeMessage.contains("500") || causeMessage.contains("503")) {
+					return "Gemini API 서버 오류가 발생했습니다. 잠시 후 다시 시도해주세요.";
+				}
+			}
+			
+			// ClientException 확인
+			if (cause.getClass().getSimpleName().contains("ClientException")) {
+				return "Gemini API 호출 중 오류가 발생했습니다: " + cause.getMessage();
+			}
+		}
+
+		// 일반적인 에러 메시지
+		String message = error.getMessage();
+		if (message != null && !message.isEmpty()) {
+			return "오류가 발생했습니다: " + message;
+		}
+
+		return "알 수 없는 오류가 발생했습니다. 잠시 후 다시 시도해주세요.";
 	}
 
 }
