@@ -303,30 +303,12 @@ public class GeminiTextService {
 
 					Flux<ChatResponse> responseFlux = streamingChatModel.stream(prompt);
 
-					responseFlux.doOnError(error -> {
-						log.error("스트리밍 중 오류 발생", error);
-						try {
-							emitter.send(SseEmitter.event()
-									.name("error")
-									.data("스트리밍 중 오류가 발생했습니다: " + error.getMessage()));
-							emitter.completeWithError(error);
-						} catch (IOException e) {
-							log.error("에러 이벤트 전송 중 오류", e);
-							emitter.completeWithError(error);
-						}
-					})
-							.doOnComplete(() -> {
-								try {
-									emitter.send(SseEmitter.event()
-											.name("complete")
-											.data("스트리밍 완료"));
-									emitter.complete();
-								} catch (IOException e) {
-									log.error("스트리밍 완료 이벤트 전송 중 오류", e);
-									emitter.completeWithError(e);
-								}
-							})
-							.subscribe(chatResponse -> {
+					// 이전 텍스트를 추적하여 델타만 전송
+					java.util.concurrent.atomic.AtomicReference<String> previousText = 
+							new java.util.concurrent.atomic.AtomicReference<>("");
+
+					responseFlux
+							.doOnNext(chatResponse -> {
 								try {
 									if (chatResponse == null || chatResponse.getResult() == null
 											|| chatResponse.getResult().getOutput() == null) {
@@ -334,14 +316,26 @@ public class GeminiTextService {
 										return;
 									}
 
-									String content = chatResponse.getResult().getOutput().getText();
-									if (content == null || content.isEmpty()) {
+									String currentText = chatResponse.getResult().getOutput().getText();
+									if (currentText == null) {
 										return;
 									}
 
-									emitter.send(SseEmitter.event()
-											.name("message")
-											.data(content));
+									// 델타만 추출 (현재 텍스트에서 이전 텍스트 제거)
+									String previous = previousText.get();
+									String delta = currentText;
+									if (currentText.startsWith(previous)) {
+										delta = currentText.substring(previous.length());
+									}
+
+									if (!delta.isEmpty()) {
+										emitter.send(SseEmitter.event()
+												.name("message")
+												.data(delta));
+										previousText.set(currentText);
+									}
+								} catch (IOException e) {
+									log.error("스트리밍 청크 전송 중 오류", e);
 								} catch (Exception e) {
 									log.error("스트리밍 응답 처리 중 오류 발생 (계속 진행)", e);
 									// JSON 파싱 에러 등이 발생해도 스트리밍은 계속 진행
@@ -353,7 +347,31 @@ public class GeminiTextService {
 										log.error("에러 이벤트 전송 중 오류", ioException);
 									}
 								}
-							});
+							})
+							.doOnError(error -> {
+								log.error("스트리밍 중 오류 발생", error);
+								try {
+									emitter.send(SseEmitter.event()
+											.name("error")
+											.data("스트리밍 중 오류가 발생했습니다: " + error.getMessage()));
+									emitter.completeWithError(error);
+								} catch (IOException e) {
+									log.error("에러 이벤트 전송 중 오류", e);
+									emitter.completeWithError(error);
+								}
+							})
+							.doOnComplete(() -> {
+								try {
+									emitter.send(SseEmitter.event()
+											.name("complete")
+											.data("스트리밍 완료"));
+									emitter.complete();
+								} catch (IOException e) {
+									log.error("스트리밍 완료 이벤트 전송 중 오류", e);
+									emitter.completeWithError(e);
+								}
+							})
+							.blockLast(); // 스트리밍 완료까지 대기
 				} else {
 					// 스트리밍 미지원 - 일반 호출 사용
 					log.warn("ChatModel이 StreamingChatModel을 구현하지 않음. 일반 호출 사용");
