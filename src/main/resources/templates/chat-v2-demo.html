@@ -509,6 +509,7 @@
         let abortController = null;
         let isStreaming = false;
         let markdownBuffer = ''; // 마크다운 버퍼
+        let markdownRendered = false; // 마크다운 렌더링 여부 추적
 
         // Marked.js 설정
         if (typeof marked !== 'undefined') {
@@ -561,8 +562,9 @@
             const aiContentElement = aiMessageElement.querySelector('.message-content');
             aiContentElement.classList.add('streaming');
             
-            // 마크다운 버퍼 초기화
+            // 마크다운 버퍼 및 렌더링 상태 초기화
             markdownBuffer = '';
+            markdownRendered = false;
 
             // 스트리밍 시작
             startStreaming(message, aiContentElement, aiMessageId);
@@ -664,9 +666,10 @@
                                     existingCursor.remove();
                                 }
                                 
-                                // 스트리밍 완료 시 무조건 마크다운 렌더링
-                                if (markdownBuffer) {
+                                // 스트리밍 완료 시 즉시 마크다운 렌더링 (검수 전에 적용)
+                                if (markdownBuffer && !markdownRendered) {
                                     renderMarkdown(contentElement, markdownBuffer);
+                                    markdownRendered = true;
                                 }
                                 
                                 contentElement.classList.remove('streaming');
@@ -706,13 +709,19 @@
                                 // 이벤트 처리
                                 if (eventType === 'start') {
                                     status.className = 'status streaming';
-                                    status.textContent = '응답 생성 중...';
+                                    status.textContent = '답변 중...';
                                 } else if (eventType === 'session') {
                                     // 새 세션 ID 받기
                                     currentSessionId = eventData;
                                     localStorage.setItem('chatV2SessionId', currentSessionId);
                                     sessionIdDisplay.textContent = currentSessionId;
                                 } else if (eventType === 'chunk') {
+                                    // 답변 중 상태 유지
+                                    if (!status.classList.contains('streaming')) {
+                                        status.className = 'status streaming';
+                                        status.textContent = '답변 중...';
+                                    }
+                                    
                                     // 마크다운 버퍼에 추가
                                     markdownBuffer += eventData;
                                     
@@ -734,15 +743,34 @@
                                     }
                                     
                                     chatContainer.scrollTop = chatContainer.scrollHeight;
+                                } else if (eventType === 'streaming-complete') {
+                                    // 스트리밍 완료 시 즉시 마크다운 렌더링 (검수 전에 적용)
+                                    const existingCursor = contentElement.querySelector('.cursor-blink');
+                                    if (existingCursor) {
+                                        existingCursor.remove();
+                                    }
+                                    
+                                    if (markdownBuffer && !markdownRendered) {
+                                        renderMarkdown(contentElement, markdownBuffer);
+                                        markdownRendered = true;
+                                    }
+                                    
+                                    contentElement.classList.remove('streaming');
+                                    
+                                    // 답변 완료, 검수 시작
+                                    status.className = 'status streaming';
+                                    status.textContent = '검수 중...';
                                 } else if (eventType === 'validation') {
                                     try {
                                         const validation = JSON.parse(eventData);
                                         addValidationBadge(messageId, validation, contentElement);
                                         
-                                        // 검수 결과와 관계없이 마크다운 렌더링 (검수는 품질 평가일 뿐)
-                                        if (markdownBuffer) {
-                                            renderMarkdown(contentElement, markdownBuffer);
-                                        }
+                                        // 검수 완료
+                                        status.className = 'status complete';
+                                        status.textContent = '검수 완료';
+                                        
+                                        // 검수 이벤트에서는 마크다운 렌더링하지 않음
+                                        // (이미 streaming-complete에서 렌더링됨)
                                     } catch (e) {
                                         console.error('검수 결과 파싱 오류:', e);
                                     }
@@ -753,14 +781,16 @@
                                         existingCursor.remove();
                                     }
                                     
-                                    // 완료 시 무조건 마크다운 렌더링
-                                    if (markdownBuffer) {
+                                    // 완료 이벤트는 스트리밍 완료 후에 올 수 있으므로,
+                                    // 아직 마크다운이 렌더링되지 않았을 때만 렌더링 (fallback)
+                                    if (markdownBuffer && !markdownRendered) {
                                         renderMarkdown(contentElement, markdownBuffer);
+                                        markdownRendered = true;
                                     }
                                     
                                     contentElement.classList.remove('streaming');
                                     status.className = 'status complete';
-                                    status.textContent = '완료: ' + (eventData || '');
+                                    status.textContent = '완료';
                                     markdownBuffer = ''; // 버퍼 초기화
                                 } else if (eventType === 'error') {
                                     // 커서 제거

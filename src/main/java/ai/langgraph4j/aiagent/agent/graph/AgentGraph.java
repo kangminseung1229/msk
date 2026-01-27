@@ -152,11 +152,11 @@ public class AgentGraph {
 
 			// 4. 조건부 분기 처리
 			if ("response".equals(nextStep)) {
-				// 응답 완료
+				// 응답 완료 - 스트리밍 완료를 명확히 알리는 이벤트 전송
 				log.info("AgentGraph: 응답 완료");
 				emitter.send(SseEmitter.event()
-						.name("step")
-						.data("응답 생성 완료"));
+						.name("streaming-complete")
+						.data("스트리밍 완료"));
 				return state;
 			}
 			
