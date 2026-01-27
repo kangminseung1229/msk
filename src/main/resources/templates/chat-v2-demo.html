@@ -1,0 +1,665 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>채팅 v2 데모 - LangGraph 기반 AI 에이전트</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            width: 100%;
+            max-width: 1000px;
+            display: flex;
+            flex-direction: column;
+            height: calc(100vh - 40px);
+            max-height: 900px;
+        }
+
+        .header {
+            padding: 24px 32px;
+            border-bottom: 2px solid #e0e0e0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header h1 {
+            color: #333;
+            font-size: 24px;
+            font-weight: 600;
+        }
+
+        .session-info {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 13px;
+            color: #666;
+        }
+
+        .session-id {
+            font-family: monospace;
+            background: #f0f0f0;
+            padding: 6px 12px;
+            border-radius: 6px;
+            max-width: 200px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .btn-small {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .btn-small:hover {
+            background: #5568d3;
+        }
+
+        .chat-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 24px 32px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .message {
+            display: flex;
+            gap: 12px;
+            animation: fadeIn 0.3s ease;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .message.user {
+            justify-content: flex-end;
+        }
+
+        .message-avatar {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            flex-shrink: 0;
+        }
+
+        .message.user .message-avatar {
+            background: #667eea;
+            color: white;
+        }
+
+        .message.ai .message-avatar {
+            background: #f0f0f0;
+            color: #666;
+        }
+
+        .message-content {
+            max-width: 70%;
+            padding: 12px 16px;
+            border-radius: 12px;
+            line-height: 1.6;
+            word-wrap: break-word;
+        }
+
+        .message.user .message-content {
+            background: #667eea;
+            color: white;
+            border-bottom-right-radius: 4px;
+        }
+
+        .message.ai .message-content {
+            background: #f0f0f0;
+            color: #333;
+            border-bottom-left-radius: 4px;
+        }
+
+        .message-content.streaming::after {
+            content: '▋';
+            animation: blink 1s infinite;
+            color: #667eea;
+        }
+
+        @keyframes blink {
+            0%, 50% {
+                opacity: 1;
+            }
+            51%, 100% {
+                opacity: 0;
+            }
+        }
+
+        .validation-badge {
+            margin-top: 8px;
+            padding: 6px 10px;
+            border-radius: 6px;
+            font-size: 11px;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .validation-badge.passed {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .validation-badge.failed {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .validation-score {
+            font-weight: 600;
+        }
+
+        .input-container {
+            padding: 20px 32px;
+            border-top: 2px solid #e0e0e0;
+            background: #fafafa;
+        }
+
+        .input-form {
+            display: flex;
+            gap: 12px;
+            align-items: flex-end;
+        }
+
+        .input-group {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .input-group label {
+            font-size: 12px;
+            color: #666;
+            font-weight: 500;
+        }
+
+        textarea {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 14px;
+            font-family: inherit;
+            resize: vertical;
+            min-height: 60px;
+            max-height: 120px;
+            transition: border-color 0.3s;
+        }
+
+        textarea:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            white-space: nowrap;
+        }
+
+        button:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+        }
+
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .status {
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            text-align: center;
+            margin-bottom: 12px;
+        }
+
+        .status.connecting {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .status.streaming {
+            background: #d1ecf1;
+            color: #0c5460;
+        }
+
+        .status.complete {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        .empty-state {
+            text-align: center;
+            color: #999;
+            padding: 60px 20px;
+        }
+
+        .empty-state-icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+        }
+
+        .settings-toggle {
+            background: none;
+            border: none;
+            color: #666;
+            cursor: pointer;
+            font-size: 14px;
+            padding: 4px 8px;
+        }
+
+        .settings-panel {
+            padding: 16px;
+            background: #f8f9fa;
+            border-top: 1px solid #e0e0e0;
+            display: none;
+        }
+
+        .settings-panel.active {
+            display: block;
+        }
+
+        .settings-group {
+            margin-bottom: 12px;
+        }
+
+        .settings-group label {
+            display: block;
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 4px;
+        }
+
+        .settings-group input,
+        .settings-group textarea {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #e0e0e0;
+            border-radius: 6px;
+            font-size: 13px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>💬 채팅 v2 데모 - LangGraph 기반</h1>
+            <div class="session-info">
+                <span>세션:</span>
+                <span class="session-id" id="sessionId">새 세션</span>
+                <button class="btn-small" onclick="newSession()">새 세션</button>
+            </div>
+        </div>
+
+        <div class="chat-container" id="chatContainer">
+            <div class="empty-state">
+                <div class="empty-state-icon">💭</div>
+                <div>대화를 시작해보세요!</div>
+            </div>
+        </div>
+
+        <div id="status" class="status hidden"></div>
+
+        <div class="input-container">
+            <button class="settings-toggle" onclick="toggleSettings()">⚙️ 설정</button>
+            <div class="settings-panel" id="settingsPanel">
+                <div class="settings-group">
+                    <label>System Instruction (선택사항)</label>
+                    <textarea id="systemInstruction" placeholder="예: 당신은 세무 전문가입니다. 정확하고 친절하게 답변하세요."></textarea>
+                </div>
+            </div>
+            <form id="chatForm" class="input-form">
+                <div class="input-group">
+                    <label for="message">메시지</label>
+                    <textarea id="message" name="message" required placeholder="질문을 입력하세요..."></textarea>
+                </div>
+                <button type="submit" id="submitBtn">전송</button>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        const chatContainer = document.getElementById('chatContainer');
+        const chatForm = document.getElementById('chatForm');
+        const messageInput = document.getElementById('message');
+        const submitBtn = document.getElementById('submitBtn');
+        const status = document.getElementById('status');
+        const sessionIdDisplay = document.getElementById('sessionId');
+        const settingsPanel = document.getElementById('settingsPanel');
+
+        let currentSessionId = localStorage.getItem('chatV2SessionId');
+        let abortController = null;
+        let isStreaming = false;
+
+        // 세션 ID 표시
+        if (currentSessionId) {
+            sessionIdDisplay.textContent = currentSessionId;
+        }
+
+        // 페이지 로드 시 세션 ID 복원
+        if (currentSessionId) {
+            sessionIdDisplay.textContent = currentSessionId;
+        } else {
+            // 세션 ID가 없으면 표시만 업데이트
+            sessionIdDisplay.textContent = '새 세션 (첫 메시지 전송 시 생성)';
+        }
+
+        chatForm.addEventListener('submit', function (e) {
+            e.preventDefault();
+
+            const message = messageInput.value.trim();
+            if (!message) {
+                alert('메시지를 입력해주세요.');
+                return;
+            }
+
+            if (isStreaming) {
+                alert('이전 메시지가 처리 중입니다. 잠시 후 다시 시도해주세요.');
+                return;
+            }
+
+            // 사용자 메시지 표시
+            addMessage('user', message);
+            messageInput.value = '';
+
+            // 빈 상태 제거
+            const emptyState = chatContainer.querySelector('.empty-state');
+            if (emptyState) {
+                emptyState.remove();
+            }
+
+            // AI 응답 영역 생성
+            const aiMessageId = 'ai-' + Date.now();
+            const aiMessageElement = addMessage('ai', '', aiMessageId);
+            const aiContentElement = aiMessageElement.querySelector('.message-content');
+            aiContentElement.classList.add('streaming');
+
+            // 스트리밍 시작
+            startStreaming(message, aiContentElement, aiMessageId);
+        });
+
+        function addMessage(type, content, id = null) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${type}`;
+            if (id) {
+                messageDiv.id = id;
+            }
+
+            const avatar = document.createElement('div');
+            avatar.className = 'message-avatar';
+            avatar.textContent = type === 'user' ? '👤' : '🤖';
+
+            const contentDiv = document.createElement('div');
+            contentDiv.className = 'message-content';
+            contentDiv.textContent = content;
+
+            messageDiv.appendChild(avatar);
+            messageDiv.appendChild(contentDiv);
+            chatContainer.appendChild(messageDiv);
+
+            // 스크롤을 맨 아래로
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+
+            return messageDiv;
+        }
+
+        function startStreaming(message, contentElement, messageId) {
+            isStreaming = true;
+            submitBtn.disabled = true;
+            status.classList.remove('hidden');
+            status.className = 'status connecting';
+            status.textContent = '연결 중...';
+
+            // 기존 연결 종료
+            if (abortController) {
+                abortController.abort();
+            }
+
+            const systemInstruction = document.getElementById('systemInstruction').value.trim() || null;
+
+            // 요청 본문
+            const requestBody = {
+                message: message,
+                sessionId: currentSessionId,
+                systemInstruction: systemInstruction
+            };
+
+            // SSE URL 구성
+            const currentPath = window.location.pathname;
+            const ssePath = currentPath.replace('/demo', '/stream');
+
+            abortController = new AbortController();
+
+            fetch(ssePath, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(requestBody),
+                signal: abortController.signal
+            })
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    return response.body;
+                })
+                .then(body => {
+                    const reader = body.getReader();
+                    const decoder = new TextDecoder();
+                    let buffer = '';
+                    let fullResponse = '';
+
+                    function readStream() {
+                        reader.read().then(({ done, value }) => {
+                            if (done) {
+                                // 스트리밍 완료
+                                contentElement.classList.remove('streaming');
+                                status.className = 'status complete';
+                                status.textContent = '완료';
+                                submitBtn.disabled = false;
+                                isStreaming = false;
+                                abortController = null;
+
+                                // 세션 ID 업데이트 (첫 응답에서 받은 경우)
+                                // 실제로는 서버에서 세션 ID를 반환해야 하지만, 
+                                // 현재는 요청에 포함된 세션 ID를 사용
+                                return;
+                            }
+
+                            buffer += decoder.decode(value, { stream: true });
+                            const events = buffer.split('\n\n');
+                            buffer = events.pop() || '';
+
+                            for (const event of events) {
+                                if (!event.trim()) continue;
+
+                                let eventType = 'chunk';
+                                let eventData = '';
+
+                                const lines = event.split('\n');
+                                for (const line of lines) {
+                                    if (line.startsWith('event:')) {
+                                        eventType = line.substring(6).trim();
+                                    } else if (line.startsWith('data:')) {
+                                        const data = line.substring(5);
+                                        eventData += (eventData ? '\n' : '') + data.trim();
+                                    }
+                                }
+
+                                // 이벤트 처리
+                                if (eventType === 'start') {
+                                    status.className = 'status streaming';
+                                    status.textContent = '응답 생성 중...';
+                                } else if (eventType === 'session') {
+                                    // 새 세션 ID 받기
+                                    currentSessionId = eventData;
+                                    localStorage.setItem('chatV2SessionId', currentSessionId);
+                                    sessionIdDisplay.textContent = currentSessionId;
+                                } else if (eventType === 'chunk') {
+                                    fullResponse += eventData;
+                                    contentElement.textContent = fullResponse;
+                                    chatContainer.scrollTop = chatContainer.scrollHeight;
+                                } else if (eventType === 'validation') {
+                                    try {
+                                        const validation = JSON.parse(eventData);
+                                        addValidationBadge(messageId, validation);
+                                    } catch (e) {
+                                        console.error('검수 결과 파싱 오류:', e);
+                                    }
+                                } else if (eventType === 'complete') {
+                                    contentElement.classList.remove('streaming');
+                                    status.className = 'status complete';
+                                    status.textContent = '완료: ' + (eventData || '');
+                                } else if (eventType === 'error') {
+                                    contentElement.classList.remove('streaming');
+                                    status.className = 'status error';
+                                    status.textContent = '오류: ' + eventData;
+                                    contentElement.textContent = fullResponse + '\n\n[오류: ' + eventData + ']';
+                                }
+                            }
+
+                            readStream();
+                        }).catch(error => {
+                            if (error.name !== 'AbortError') {
+                                console.error('스트리밍 읽기 오류:', error);
+                                contentElement.classList.remove('streaming');
+                                status.className = 'status error';
+                                status.textContent = '스트리밍 중 오류가 발생했습니다.';
+                                submitBtn.disabled = false;
+                                isStreaming = false;
+                                abortController = null;
+                            }
+                        });
+                    }
+
+                    readStream();
+                })
+                .catch(error => {
+                    if (error.name !== 'AbortError') {
+                        console.error('SSE 연결 오류:', error);
+                        status.className = 'status error';
+                        status.textContent = '연결 오류가 발생했습니다.';
+                        submitBtn.disabled = false;
+                        isStreaming = false;
+                        abortController = null;
+                    }
+                });
+        }
+
+        function addValidationBadge(messageId, validation) {
+            const messageElement = document.getElementById(messageId);
+            if (!messageElement) return;
+
+            let badge = messageElement.querySelector('.validation-badge');
+            if (!badge) {
+                badge = document.createElement('div');
+                badge.className = 'validation-badge';
+                messageElement.querySelector('.message-content').appendChild(badge);
+            }
+
+            if (validation.passed) {
+                badge.className = 'validation-badge passed';
+                badge.innerHTML = `
+                    <span class="validation-score">✓ 검수 통과</span>
+                    <span>점수: ${(validation.score * 100).toFixed(0)}%</span>
+                `;
+            } else {
+                badge.className = 'validation-badge failed';
+                badge.innerHTML = `
+                    <span class="validation-score">✗ 검수 실패</span>
+                    <span>점수: ${(validation.score * 100).toFixed(0)}%</span>
+                `;
+            }
+
+            if (validation.feedback) {
+                badge.title = validation.feedback;
+            }
+        }
+
+        function newSession() {
+            if (confirm('새 세션을 시작하시겠습니까? 현재 대화 내용은 유지되지만 서버의 세션은 초기화됩니다.')) {
+                currentSessionId = null;
+                localStorage.removeItem('chatV2SessionId');
+                sessionIdDisplay.textContent = '새 세션';
+            }
+        }
+
+        function toggleSettings() {
+            settingsPanel.classList.toggle('active');
+        }
+
+        // Enter 키로 전송 (Shift+Enter는 줄바꿈)
+        messageInput.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                chatForm.dispatchEvent(new Event('submit'));
+            }
+        });
+    </script>
+</body>
+
+</html>

@@ -19,6 +19,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import ai.langgraph4j.aiagent.agent.state.AgentState;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.data.message.AiMessage;
+import dev.langchain4j.data.message.UserMessage;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Flux;
 
@@ -136,10 +137,12 @@ public class LlmNode {
 	/**
 	 * 대화 히스토리를 Spring AI Message 리스트로 변환
 	 * 
+	 * v2: 대화 히스토리 지원
+	 * state.getMessages()에 저장된 이전 대화 히스토리를 포함하여 멀티 턴 대화를 지원합니다.
+	 * 
 	 * Phase 3: Spring AI Tool 자동 호출
 	 * Spring AI가 자동으로 Tool을 호출하고 결과를 LLM에 전달하므로,
 	 * Tool 실행 결과를 수동으로 추가할 필요가 없습니다.
-	 * Spring AI가 내부에서 Tool 실행 결과를 처리하고 LLM에 전달합니다.
 	 */
 	private List<Message> prepareMessages(AgentState state) {
 		List<Message> messages = new ArrayList<>();
@@ -154,21 +157,33 @@ public class LlmNode {
 					"당신은 친절하고 도움이 되는 AI 어시스턴트입니다. 사용자의 질문에 정확하고 유용한 답변을 한국어로 제공하세요."));
 		}
 
-		// 사용자 메시지가 있으면 추가
+		// v2: 이전 대화 히스토리 추가 (state.getMessages()에 저장된 메시지들)
+		// state.getMessages()에는 dev.langchain4j.data.message.UserMessage와 AiMessage가 저장됨
+		if (state.getMessages() != null && !state.getMessages().isEmpty()) {
+			for (Object msg : state.getMessages()) {
+				if (msg instanceof UserMessage userMsg) {
+					// LangChain4j UserMessage를 Spring AI UserMessage로 변환
+					messages.add(new org.springframework.ai.chat.messages.UserMessage(userMsg.singleText()));
+				} else if (msg instanceof AiMessage aiMsg) {
+					// LangChain4j AiMessage를 Spring AI AssistantMessage로 변환
+					// Spring AI에서는 AiMessage가 아니라 AssistantMessage를 사용함
+					messages.add(new org.springframework.ai.chat.messages.AssistantMessage(aiMsg.text()));
+				}
+				// 다른 타입의 메시지는 무시
+			}
+		}
+
+		// 현재 사용자 메시지 추가 (히스토리에 아직 추가되지 않은 새 메시지)
+		// state.getUserMessage()는 dev.langchain4j.data.message.UserMessage 타입
 		if (state.getUserMessage() != null) {
 			messages.add(new org.springframework.ai.chat.messages.UserMessage(
 					state.getUserMessage().singleText()));
 		}
 
-		// Phase 3: Spring AI Tool 자동 호출
-		// Spring AI가 자동으로 Tool을 호출하고 결과를 LLM에 전달하므로,
-		// Tool 실행 결과를 수동으로 추가할 필요가 없습니다.
-		// Spring AI가 내부에서 Tool 실행 결과를 처리하고 LLM에 전달합니다.
-		//
-		// 참고: 현재는 단일 턴 대화를 지원하지만, 향후 멀티 턴 대화를 지원하려면
-		// state.getMessages()의 이전 대화 히스토리도 포함해야 합니다.
-		// 하지만 Spring AI가 Tool 실행을 자동으로 처리하므로, Tool 실행 결과는
-		// Spring AI 내부에서 관리됩니다.
+		log.debug("LlmNode: 메시지 준비 완료 - System: 1개, 히스토리: {}개, 현재 사용자: {}개, 전체: {}개",
+				state.getMessages() != null ? state.getMessages().size() : 0,
+				state.getUserMessage() != null ? 1 : 0,
+				messages.size());
 
 		return messages;
 	}
