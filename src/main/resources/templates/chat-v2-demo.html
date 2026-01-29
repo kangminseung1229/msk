@@ -507,6 +507,7 @@
         let currentSessionId = localStorage.getItem('chatV2SessionId');
         let abortController = null;
         let isStreaming = false;
+        let isSubmitting = false; // 중복 제출 방지 플래그
         let markdownBuffer = ''; // 마크다운 버퍼
         let markdownRendered = false; // 마크다운 렌더링 여부 추적
 
@@ -534,6 +535,11 @@
         chatForm.addEventListener('submit', function (e) {
             e.preventDefault();
 
+            // 중복 제출 방지
+            if (isSubmitting) {
+                return;
+            }
+
             const message = messageInput.value.trim();
             if (!message) {
                 alert('메시지를 입력해주세요.');
@@ -544,6 +550,9 @@
                 alert('이전 메시지가 처리 중입니다. 잠시 후 다시 시도해주세요.');
                 return;
             }
+
+            // 제출 시작 플래그 설정
+            isSubmitting = true;
 
             // 사용자 메시지 표시
             addMessage('user', message);
@@ -612,6 +621,7 @@
 
         function startStreaming(message, contentElement, messageId) {
             isStreaming = true;
+            isSubmitting = false; // 제출 완료, 다음 제출 허용
             submitBtn.disabled = true;
             status.classList.remove('hidden');
             status.className = 'status connecting';
@@ -676,6 +686,7 @@
                                 status.textContent = '완료';
                                 submitBtn.disabled = false;
                                 isStreaming = false;
+                                isSubmitting = false; // 완료 시 플래그 해제
                                 abortController = null;
                                 markdownBuffer = ''; // 버퍼 초기화
 
@@ -790,6 +801,9 @@
                                     contentElement.classList.remove('streaming');
                                     status.className = 'status complete';
                                     status.textContent = '완료';
+                                    submitBtn.disabled = false;
+                                    isStreaming = false;
+                                    isSubmitting = false; // 완료 시 플래그 해제
                                     markdownBuffer = ''; // 버퍼 초기화
                                 } else if (eventType === 'error') {
                                     // 커서 제거
@@ -801,6 +815,9 @@
                                     contentElement.classList.remove('streaming');
                                     status.className = 'status error';
                                     status.textContent = '오류: ' + eventData;
+                                    submitBtn.disabled = false;
+                                    isStreaming = false;
+                                    isSubmitting = false; // 에러 시 플래그 해제
                                     
                                     // 오류 시에는 원본 텍스트로 표시
                                     const errorText = markdownBuffer + '\n\n[오류: ' + eventData + ']';
@@ -818,6 +835,7 @@
                                 status.textContent = '스트리밍 중 오류가 발생했습니다.';
                                 submitBtn.disabled = false;
                                 isStreaming = false;
+                                isSubmitting = false; // 에러 시 플래그 해제
                                 abortController = null;
                             }
                         });
@@ -832,6 +850,7 @@
                         status.textContent = '연결 오류가 발생했습니다.';
                         submitBtn.disabled = false;
                         isStreaming = false;
+                        isSubmitting = false; // 에러 시 플래그 해제
                         abortController = null;
                     }
                 });
@@ -917,7 +936,20 @@
         messageInput.addEventListener('keydown', function (e) {
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
-                chatForm.dispatchEvent(new Event('submit'));
+                
+                // 중복 제출 방지
+                if (isSubmitting || isStreaming) {
+                    return;
+                }
+                
+                // Mac에서 마지막 글자가 잘리는 문제를 방지하기 위해 
+                // 다음 이벤트 루프에서 submit 처리
+                setTimeout(function() {
+                    // setTimeout 내부에서도 다시 한 번 체크 (중복 방지)
+                    if (!isSubmitting && !isStreaming) {
+                        chatForm.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+                    }
+                }, 0);
             }
         });
     </script>
