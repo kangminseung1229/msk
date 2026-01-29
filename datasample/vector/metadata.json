@@ -1,7 +1,16 @@
 {
-    "title": "전기오류",
-    "counselId": 78862,
-    "createdAt": "2004-03-08T00:00",
-    "fieldLarge": "법인세",
-    "documentType": "counsel"
+    "lawId": "001563",
+    "lawKey": "001563202512232121720260701",
+    "articleId": 7922634,
+    "articleKey": "0055001",
+    "articleCode": "55",
+    "enforceDate": "20260701",
+    "lawCategory": "법률",
+    "articleTitle": "세율",
+    "documentType": "lawArticle",
+    "articleNumber": "55",
+    "lawNameKorean": "법인세법",
+    "lawNameNickname": "",
+    "articleEnforceDate": "20260701",
+    "articleKoreanString": "제55조"
 }

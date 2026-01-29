@@ -1,8 +1,14 @@
 package ai.langgraph4j.aiagent.service;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 
+import org.springframework.core.io.Resource;
+import org.springframework.core.io.ResourceLoader;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StreamUtils;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import ai.langgraph4j.aiagent.agent.graph.AgentGraph;
@@ -34,6 +40,7 @@ public class ChatV2Service {
 	private final ResponseNode responseNode;
 	private final ValidationNode validationNode;
 	private final SessionStore sessionStore;
+	private final ResourceLoader resourceLoader;
 
 	/**
 	 * 채팅 실행 (비스트리밍)
@@ -53,8 +60,11 @@ public class ChatV2Service {
 			log.info("ChatV2Service: 새 세션 생성 - sessionId: {}", sessionId);
 		}
 
+		// System Instruction 처리 (비어있으면 기본값 사용)
+		String systemInstruction = getSystemInstruction(request.getSystemInstruction());
+		
 		// 기존 세션 로드 (대화 히스토리 포함)
-		AgentState initialState = loadOrCreateSession(sessionId, request.getSystemInstruction());
+		AgentState initialState = loadOrCreateSession(sessionId, systemInstruction);
 
 		// 사용자 메시지 추가
 		UserMessage userMessage = new UserMessage(request.getMessage());
@@ -103,10 +113,13 @@ public class ChatV2Service {
 			log.info("ChatV2Service: 새 세션 생성 - sessionId: {}", sessionId);
 		}
 
+		// System Instruction 처리 (비어있으면 기본값 사용)
+		String systemInstruction = getSystemInstruction(request.getSystemInstruction());
+		
 		// 람다 표현식에서 사용할 final 변수들
 		final String finalSessionId = sessionId;
 		final String message = request.getMessage();
-		final String systemInstruction = request.getSystemInstruction();
+		final String finalSystemInstruction = systemInstruction;
 		final String originalSessionId = request.getSessionId();
 
 		SseEmitter emitter = new SseEmitter(Long.MAX_VALUE);
@@ -116,7 +129,7 @@ public class ChatV2Service {
 				long startTime = System.currentTimeMillis();
 
 				// 기존 세션 로드
-				AgentState initialState = loadOrCreateSession(finalSessionId, systemInstruction);
+				AgentState initialState = loadOrCreateSession(finalSessionId, finalSystemInstruction);
 
 				// 사용자 메시지 추가
 				UserMessage userMessage = new UserMessage(message);
@@ -189,6 +202,40 @@ public class ChatV2Service {
 		});
 
 		return emitter;
+	}
+
+	/**
+	 * System Instruction 가져오기 (비어있으면 기본값 파일에서 읽기)
+	 * 
+	 * @param providedSystemInstruction 사용자가 제공한 System Instruction (null 또는 빈 문자열 가능)
+	 * @return System Instruction 문자열
+	 */
+	private String getSystemInstruction(String providedSystemInstruction) {
+		// 사용자가 제공한 System Instruction이 있으면 사용
+		if (providedSystemInstruction != null && !providedSystemInstruction.trim().isEmpty()) {
+			log.debug("ChatV2Service: 사용자 제공 System Instruction 사용");
+			return providedSystemInstruction.trim();
+		}
+		
+		// 비어있으면 기본값 파일에서 읽기
+		try {
+			Resource resource = resourceLoader.getResource("classpath:prompts/default-system-instruction.txt");
+			if (resource.exists()) {
+				try (InputStream inputStream = resource.getInputStream()) {
+					String defaultInstruction = StreamUtils.copyToString(inputStream, StandardCharsets.UTF_8);
+					log.debug("ChatV2Service: 기본 System Instruction 파일에서 로드");
+					return defaultInstruction.trim();
+				}
+			} else {
+				log.warn("ChatV2Service: 기본 System Instruction 파일을 찾을 수 없습니다: prompts/default-system-instruction.txt");
+			}
+		} catch (IOException e) {
+			log.error("ChatV2Service: 기본 System Instruction 파일 읽기 실패", e);
+		}
+		
+		// 파일을 읽을 수 없으면 하드코딩된 기본값 사용
+		log.debug("ChatV2Service: 하드코딩된 기본 System Instruction 사용");
+		return "당신은 친절하고 도움이 되는 AI 어시스턴트입니다. 사용자의 질문에 정확하고 유용한 답변을 한국어로 제공하세요.";
 	}
 
 	/**
