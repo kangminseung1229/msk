@@ -10,6 +10,7 @@ import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.StreamingChatModel;
 import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.ai.chat.metadata.Usage;
 import org.springframework.ai.retry.NonTransientAiException;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
@@ -76,7 +77,15 @@ public class LlmNode {
 			// ChatModel에 Tool이 이미 통합되어 있으므로, Spring AI가 자동으로 Tool을 호출합니다.
 			// Tool 호출이 필요한 경우 Spring AI가 자동으로 처리하고 결과를 LLM에 전달합니다.
 			Prompt prompt = new Prompt(messages);
+
+			// 토큰 수 추정 및 로깅 (LLM 호출 전)
+			long estimatedInputTokens = estimateTokens(prompt);
+			log.info("LlmNode: LLM 호출 전 토큰 추정 - 입력 토큰: {}개 (메시지 수: {}개)", 
+					estimatedInputTokens, messages.size());
 			ChatResponse response = chatModel.call(prompt);
+
+			// 실제 토큰 사용량 확인 및 로깅 (LLM 호출 후)
+			logTokenUsage(response, estimatedInputTokens);
 
 			// 응답 추출
 			// Spring AI가 Tool을 자동으로 호출했을 수 있으므로, 최종 응답을 확인합니다.
@@ -227,6 +236,11 @@ public class LlmNode {
 				StreamingChatModel streamingChatModel = (StreamingChatModel) chatModel;
 				Prompt prompt = new Prompt(messages);
 
+				// 토큰 수 추정 및 로깅 (LLM 호출 전)
+				long estimatedInputTokens = estimateTokens(prompt);
+				log.info("LlmNode: 스트리밍 LLM 호출 전 토큰 추정 - 입력 토큰: {}개 (메시지 수: {}개)", 
+						estimatedInputTokens, messages.size());
+
 				// 스트리밍 응답 수집
 				AtomicReference<StringBuilder> fullResponse = new AtomicReference<>(new StringBuilder());
 				AtomicReference<ChatResponse> lastResponse = new AtomicReference<>();
@@ -301,6 +315,18 @@ public class LlmNode {
 				state.getMessages().add(aiMessage);
 				state.setCurrentStep("llm");
 
+				// 실제 토큰 사용량 확인 및 로깅 (스트리밍 응답의 경우)
+				ChatResponse finalResponse = lastResponse.get();
+				if (finalResponse != null) {
+					logTokenUsage(finalResponse, estimatedInputTokens);
+				} else {
+					// 응답이 없으면 추정값만 로깅
+					long estimatedOutputTokens = estimateTokensFromText(finalContent);
+					log.info("LlmNode: 스트리밍 LLM 호출 완료 - 입력 토큰: {}개 (추정), 출력 토큰: {}개 (추정), 총: {}개 (추정), 응답 길이: {}자",
+							estimatedInputTokens, estimatedOutputTokens, 
+							estimatedInputTokens + estimatedOutputTokens, finalContent.length());
+				}
+
 				log.debug("LlmNode: 스트리밍 LLM 호출 완료, 반복 횟수: {}, 응답 길이: {}자",
 						state.getIterationCount(), finalContent.length());
 
@@ -367,6 +393,113 @@ public class LlmNode {
 			}
 
 			return state;
+		}
+	}
+
+	/**
+	 * Prompt의 토큰 수를 추정
+	 * 한국어 중심 텍스트 기준: 1 토큰 ≈ 2.5 문자 (보수적 추정)
+	 * 
+	 * @param prompt Prompt 객체
+	 * @return 추정된 토큰 수
+	 */
+	private long estimateTokens(Prompt prompt) {
+		if (prompt == null || prompt.getInstructions() == null || prompt.getInstructions().isEmpty()) {
+			return 0;
+		}
+
+		// Prompt의 전체 텍스트 길이 추정
+		long totalChars = 0;
+		for (Message msg : prompt.getInstructions()) {
+			try {
+				// Message의 toString()으로 대략적인 길이 추정
+				// 실제로는 Message의 내용을 정확히 추출해야 하지만,
+				// 토큰 추정 목적이므로 Prompt의 toString() 사용
+				String text = msg.toString();
+				if (text != null && text.length() > 20) { // 클래스명보다 긴 경우만 카운트
+					totalChars += text.length();
+				}
+			} catch (Exception e) {
+				// 메시지 파싱 실패 시 기본값 사용
+				totalChars += 100;
+			}
+		}
+
+		// Prompt 전체를 문자열로 변환하여 더 정확한 추정
+		try {
+			String promptText = prompt.toString();
+			if (promptText != null && promptText.length() > totalChars) {
+				totalChars = promptText.length();
+			}
+		} catch (Exception e) {
+			// 무시하고 계속 진행
+		}
+
+		// 한국어 중심 텍스트: 1 토큰 ≈ 2.5 문자 (보수적 추정)
+		// 영어는 1 토큰 ≈ 4 문자, 한국어는 1 토큰 ≈ 2-3 문자
+		// 혼합 텍스트를 고려하여 2.5로 설정
+		return Math.round(totalChars / 2.5);
+	}
+
+	/**
+	 * 텍스트의 토큰 수를 추정
+	 * 
+	 * @param text 텍스트
+	 * @return 추정된 토큰 수
+	 */
+	private long estimateTokensFromText(String text) {
+		if (text == null || text.isEmpty()) {
+			return 0;
+		}
+		return Math.round(text.length() / 2.5);
+	}
+
+	/**
+	 * ChatResponse에서 실제 토큰 사용량을 확인하고 로깅
+	 * 
+	 * @param response ChatResponse
+	 * @param estimatedInputTokens 추정된 입력 토큰 수
+	 */
+	private void logTokenUsage(ChatResponse response, long estimatedInputTokens) {
+		if (response == null) {
+			return;
+		}
+
+		try {
+			Usage usage = response.getMetadata() != null ? response.getMetadata().getUsage() : null;
+			
+			if (usage != null) {
+				// 실제 토큰 사용량이 있는 경우
+				Integer promptTokensInt = usage.getPromptTokens();
+				Integer totalTokensInt = usage.getTotalTokens();
+				
+				Long promptTokens = promptTokensInt != null ? Long.valueOf(promptTokensInt) : null;
+				Long totalTokens = totalTokensInt != null ? Long.valueOf(totalTokensInt) : null;
+				
+				// 출력 토큰 수 계산 (총 토큰 - 입력 토큰)
+				Long completionTokens = null;
+				if (promptTokens != null && totalTokens != null) {
+					completionTokens = totalTokens - promptTokens;
+				}
+
+				log.info("LlmNode: LLM 토큰 사용량 - 입력: {}개, 출력: {}개, 총: {}개 (실제 사용량)", 
+						promptTokens != null ? promptTokens : "N/A",
+						completionTokens != null ? completionTokens : "N/A",
+						totalTokens != null ? totalTokens : "N/A");
+
+				// 추정값과 실제값 비교
+				if (promptTokens != null && estimatedInputTokens > 0) {
+					long diff = Math.abs(promptTokens - estimatedInputTokens);
+					double diffPercent = (diff * 100.0) / estimatedInputTokens;
+					log.debug("LlmNode: 토큰 추정 정확도 - 추정: {}개, 실제: {}개, 차이: {}개 ({}%)", 
+							estimatedInputTokens, promptTokens, diff, String.format("%.1f", diffPercent));
+				}
+			} else {
+				// Usage 메타데이터가 없는 경우 (일부 모델은 제공하지 않음)
+				log.info("LlmNode: LLM 토큰 사용량 - 입력: {}개 (추정값, 실제 사용량 정보 없음)", estimatedInputTokens);
+			}
+		} catch (Exception e) {
+			log.debug("LlmNode: 토큰 사용량 확인 중 오류 (무시하고 계속 진행): {}", e.getMessage());
 		}
 	}
 
