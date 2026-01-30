@@ -53,12 +53,18 @@ echo -e "${GREEN}파일 전송 완료${NC}"
 
 # 3. SSH로 Docker 배포
 echo -e "${YELLOW}[3/3] Docker 서비스 배포 중...${NC}"
-ssh "${REMOTE_HOST}" "cd ${REMOTE_PATH} && docker-compose up -d --build ${SERVICE_NAME}"
+# Redis 서비스도 함께 시작 (app 서비스가 Redis에 의존하므로)
+# depends_on으로 자동 시작되지만, 명시적으로 시작하여 로그 확인
+ssh "${REMOTE_HOST}" "cd ${REMOTE_PATH} && docker-compose up -d --build redis ${SERVICE_NAME}"
 
 if [ $? -ne 0 ]; then
     echo -e "${RED}배포 실패!${NC}"
     exit 1
 fi
+
+# Redis 서비스 상태 확인
+echo -e "${YELLOW}Redis 서비스 상태 확인 중...${NC}"
+ssh "${REMOTE_HOST}" "cd ${REMOTE_PATH} && docker-compose ps redis"
 
 echo -e "${GREEN}========================================${NC}"
 echo -e "${GREEN}배포 완료!${NC}"

@@ -1,16 +1,22 @@
 {
-    "lawId": "001563",
-    "lawKey": "001563202512232121720260701",
-    "articleId": 7922634,
-    "articleKey": "0055001",
-    "articleCode": "55",
-    "enforceDate": "20260701",
-    "lawCategory": "법률",
-    "articleTitle": "세율",
-    "documentType": "lawArticle",
-    "articleNumber": "55",
-    "lawNameKorean": "법인세법",
-    "lawNameNickname": "",
-    "articleEnforceDate": "20260701",
-    "articleKoreanString": "제55조"
+    "title": "자본적 지출 및 수익적 지출 여부 확인",
+    "lawIds": [
+        "003608"
+    ],
+    "counselId": 99006,
+    "createdAt": "2025-12-15T14:55:30.198625",
+    "fieldLarge": "기업회계",
+    "articleKeys": [
+        "0031001"
+    ],
+    "lawArticles": [
+        "제 31조"
+    ],
+    "documentType": "counsel",
+    "lawArticleKeys": [
+        "0031001"
+    ],
+    "lawArticlePairs": [
+        "003608:0031001"
+    ]
 }

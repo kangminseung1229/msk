@@ -7,6 +7,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.redis.RedisConnectionFailureException;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 
@@ -70,8 +71,14 @@ public class SessionStore {
 			
 			redisTemplate.opsForValue().set(sessionKey, stateJson, SESSION_TTL_HOURS, TimeUnit.HOURS);
 			log.debug("SessionStore: 세션 저장 완료 - sessionId: {}", sessionId);
+		} catch (RedisConnectionFailureException e) {
+			log.error("SessionStore: Redis 연결 실패로 세션 저장 실패 - sessionId: {}, 오류: {}", 
+					sessionId, e.getMessage());
+			// Redis 연결 실패는 심각한 문제이므로 상세 로깅
+			log.error("SessionStore: Redis 연결 상태를 확인하세요. Redis 서비스가 실행 중인지 확인하세요.", e);
 		} catch (Exception e) {
-			log.error("SessionStore: 세션 저장 중 오류 발생 - sessionId: {}", sessionId, e);
+			log.error("SessionStore: 세션 저장 중 오류 발생 - sessionId: {}, 오류 타입: {}, 메시지: {}", 
+					sessionId, e.getClass().getSimpleName(), e.getMessage(), e);
 		}
 	}
 
@@ -92,7 +99,7 @@ public class SessionStore {
 			String stateJson = redisTemplate.opsForValue().get(sessionKey);
 			
 			if (stateJson == null) {
-				log.debug("SessionStore: 세션을 찾을 수 없음 - sessionId: {}", sessionId);
+				log.debug("SessionStore: 세션을 찾을 수 없음 - sessionId: {} (새 세션이거나 만료됨)", sessionId);
 				return null;
 			}
 
@@ -102,8 +109,15 @@ public class SessionStore {
 			
 			log.debug("SessionStore: 세션 조회 완료 - sessionId: {}", sessionId);
 			return state;
+		} catch (RedisConnectionFailureException e) {
+			log.error("SessionStore: Redis 연결 실패로 세션 조회 실패 - sessionId: {}, 오류: {}", 
+					sessionId, e.getMessage());
+			// Redis 연결 실패는 심각한 문제이므로 상세 로깅
+			log.error("SessionStore: Redis 연결 상태를 확인하세요. Redis 서비스가 실행 중인지 확인하세요.", e);
+			return null;
 		} catch (Exception e) {
-			log.error("SessionStore: 세션 조회 중 오류 발생 - sessionId: {}", sessionId, e);
+			log.error("SessionStore: 세션 조회 중 오류 발생 - sessionId: {}, 오류 타입: {}, 메시지: {}", 
+					sessionId, e.getClass().getSimpleName(), e.getMessage(), e);
 			return null;
 		}
 	}
@@ -144,8 +158,13 @@ public class SessionStore {
 			
 			log.debug("SessionStore: 히스토리 추가 완료 - sessionId: {}, 히스토리 크기: {} (제한: {})", 
 					sessionId, history.size(), maxHistoryMessages > 0 ? maxHistoryMessages : "무제한");
+		} catch (RedisConnectionFailureException e) {
+			log.error("SessionStore: Redis 연결 실패로 히스토리 추가 실패 - sessionId: {}, 오류: {}", 
+					sessionId, e.getMessage());
+			log.error("SessionStore: Redis 연결 상태를 확인하세요. Redis 서비스가 실행 중인지 확인하세요.", e);
 		} catch (Exception e) {
-			log.error("SessionStore: 히스토리 추가 중 오류 발생 - sessionId: {}", sessionId, e);
+			log.error("SessionStore: 히스토리 추가 중 오류 발생 - sessionId: {}, 오류 타입: {}, 메시지: {}", 
+					sessionId, e.getClass().getSimpleName(), e.getMessage(), e);
 		}
 	}
 
@@ -166,7 +185,7 @@ public class SessionStore {
 			String historyJson = redisTemplate.opsForValue().get(historyKey);
 			
 			if (historyJson == null) {
-				log.debug("SessionStore: 히스토리를 찾을 수 없음 - sessionId: {}", sessionId);
+				log.debug("SessionStore: 히스토리를 찾을 수 없음 - sessionId: {} (새 세션이거나 만료됨)", sessionId);
 				return new ArrayList<>();
 			}
 
@@ -180,8 +199,14 @@ public class SessionStore {
 			log.debug("SessionStore: 히스토리 조회 완료 - sessionId: {}, 히스토리 크기: {} (제한: {})", 
 					sessionId, history.size(), maxHistoryMessages > 0 ? maxHistoryMessages : "무제한");
 			return history;
+		} catch (RedisConnectionFailureException e) {
+			log.error("SessionStore: Redis 연결 실패로 히스토리 조회 실패 - sessionId: {}, 오류: {}", 
+					sessionId, e.getMessage());
+			log.error("SessionStore: Redis 연결 상태를 확인하세요. Redis 서비스가 실행 중인지 확인하세요.", e);
+			return new ArrayList<>();
 		} catch (Exception e) {
-			log.error("SessionStore: 히스토리 조회 중 오류 발생 - sessionId: {}", sessionId, e);
+			log.error("SessionStore: 히스토리 조회 중 오류 발생 - sessionId: {}, 오류 타입: {}, 메시지: {}", 
+					sessionId, e.getClass().getSimpleName(), e.getMessage(), e);
 			return new ArrayList<>();
 		}
 	}
@@ -274,8 +299,31 @@ public class SessionStore {
 			String sessionKey = SESSION_KEY_PREFIX + sessionId;
 			Boolean exists = redisTemplate.hasKey(sessionKey);
 			return exists != null && exists;
+		} catch (RedisConnectionFailureException e) {
+			log.error("SessionStore: Redis 연결 실패로 세션 존재 확인 실패 - sessionId: {}, 오류: {}", 
+					sessionId, e.getMessage());
+			return false;
 		} catch (Exception e) {
-			log.error("SessionStore: 세션 존재 확인 중 오류 발생 - sessionId: {}", sessionId, e);
+			log.error("SessionStore: 세션 존재 확인 중 오류 발생 - sessionId: {}, 오류 타입: {}, 메시지: {}", 
+					sessionId, e.getClass().getSimpleName(), e.getMessage(), e);
+			return false;
+		}
+	}
+
+	/**
+	 * Redis 연결 상태 확인
+	 * 
+	 * @return Redis 연결 가능 여부
+	 */
+	public boolean isRedisAvailable() {
+		try {
+			redisTemplate.opsForValue().get("health-check");
+			return true;
+		} catch (RedisConnectionFailureException e) {
+			log.warn("SessionStore: Redis 연결 불가 - {}", e.getMessage());
+			return false;
+		} catch (Exception e) {
+			log.warn("SessionStore: Redis 상태 확인 중 오류 - {}", e.getMessage());
 			return false;
 		}
 	}
