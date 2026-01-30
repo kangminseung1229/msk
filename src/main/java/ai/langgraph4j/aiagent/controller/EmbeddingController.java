@@ -7,13 +7,16 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import ai.langgraph4j.aiagent.controller.dto.TokenEstimateResponse;
+import ai.langgraph4j.aiagent.controller.dto.YpTokenEstimateResponse;
 import ai.langgraph4j.aiagent.entity.law.TaxLawCode;
 import ai.langgraph4j.aiagent.repository.TaxLawCodeRepository;
 import ai.langgraph4j.aiagent.service.CounselEmbeddingService;
 import ai.langgraph4j.aiagent.service.LawArticleEmbeddingService;
+import ai.langgraph4j.aiagent.service.YpEmbeddingService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -37,6 +40,7 @@ public class EmbeddingController {
 
 	private final CounselEmbeddingService counselEmbeddingService;
 	private final LawArticleEmbeddingService lawArticleEmbeddingService;
+	private final YpEmbeddingService ypEmbeddingService;
 	private final TaxLawCodeRepository taxLawCodeRepository;
 
 	/**
@@ -157,6 +161,41 @@ public class EmbeddingController {
 		TokenEstimateResponse response = lawArticleEmbeddingService.estimateTokensByLawId(lawId);
 
 		return ResponseEntity.ok(response);
+	}
+
+	/**
+	 * 예규판례 상위 100건 임베딩 토큰 수·비용 예상 계산
+	 *
+	 * @return 토큰 계산 결과
+	 */
+	@Operation(summary = "예규판례 상위 100건 토큰 계산", description = "삭제되지 않은 예규판례 상위 100건을 임베딩할 때 예상 토큰 수와 비용을 계산합니다.")
+	@ApiResponses(value = {
+			@ApiResponse(responseCode = "200", description = "토큰 계산 완료", content = @Content(schema = @Schema(implementation = YpTokenEstimateResponse.class)))
+	})
+	@GetMapping("/yp/token-estimate-top100")
+	public ResponseEntity<YpTokenEstimateResponse> estimateYpTokensTop100() {
+		log.info("예규판례 상위 100건 토큰 계산 요청");
+		YpTokenEstimateResponse response = ypEmbeddingService.estimateTokensTop100();
+		return ResponseEntity.ok(response);
+	}
+
+	/**
+	 * 예규판례 임베딩 (최근 N년 이내 document_date 기준, 페이징으로 전체 대상)
+	 *
+	 * @param recentYears 최근 몇 년 이내 (기본 5). document_date(yyyyMMdd)가 이 기간 이내인 건을 페이징으로 전부 임베딩.
+	 * @return 처리된 문서 수 (청크 포함)
+	 */
+	@Operation(summary = "예규판례 임베딩 (최근 N년)", description = "document_date가 최근 N년 이내인 예규판례를 페이징으로 전부 임베딩하여 Vector Store에 저장합니다. document_date 형식: yyyyMMdd")
+	@ApiResponses(value = {
+			@ApiResponse(responseCode = "200", description = "임베딩 완료", content = @Content(schema = @Schema(implementation = EmbeddingResponse.class)))
+	})
+	@PostMapping("/yp/top100")
+	public ResponseEntity<EmbeddingResponse> embedYpByRecentYears(
+			@Parameter(description = "최근 몇 년 이내 (document_date 기준)", example = "5") @RequestParam(defaultValue = "5") int recentYears) {
+		log.info("예규판례 임베딩 요청: 최근 {}년", recentYears);
+		int years = recentYears > 0 ? recentYears : 5;
+		int count = ypEmbeddingService.embedByRecentYears(years);
+		return ResponseEntity.ok(new EmbeddingResponse("예규판례 최근 " + years + "년 이내 임베딩 완료", count));
 	}
 
 	/**
