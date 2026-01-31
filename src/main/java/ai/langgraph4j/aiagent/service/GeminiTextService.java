@@ -523,25 +523,30 @@ public class GeminiTextService {
 	private String formatSearchResultsForContext(List<SearchResult> results) {
 		StringBuilder sb = new StringBuilder();
 
-		// 상담 결과와 법령 결과를 구분하여 표시
+		// 상담·법령·예규판례 결과를 구분하여 표시
 		List<SearchResult> counselResults = results.stream()
 				.filter(r -> "counsel".equals(r.getDocumentType()))
 				.toList();
 		List<SearchResult> lawArticleResults = results.stream()
 				.filter(r -> "lawArticle".equals(r.getDocumentType()))
 				.toList();
+		List<SearchResult> ypResults = results.stream()
+				.filter(r -> "yp".equals(r.getDocumentType()))
+				.toList();
 
 		// 디버깅: documentType 확인
-		log.info("formatSearchResultsForContext - 전체 결과: {}건, 상담: {}건, 법령: {}건",
-				results.size(), counselResults.size(), lawArticleResults.size());
+		log.info("formatSearchResultsForContext - 전체 결과: {}건, 상담: {}건, 법령: {}건, 예규·판례: {}건",
+				results.size(), counselResults.size(), lawArticleResults.size(), ypResults.size());
 		if (!lawArticleResults.isEmpty()) {
 			log.info("법령 결과 상세 - 첫 번째 법령 documentType: {}, title: {}",
 					lawArticleResults.get(0).getDocumentType(),
 					lawArticleResults.get(0).getTitle());
 		}
-		// documentType이 다른 결과 확인
+		// documentType이 다른 결과 확인 (counsel, lawArticle, yp 제외)
 		List<SearchResult> otherResults = results.stream()
-				.filter(r -> !"counsel".equals(r.getDocumentType()) && !"lawArticle".equals(r.getDocumentType()))
+				.filter(r -> !"counsel".equals(r.getDocumentType())
+						&& !"lawArticle".equals(r.getDocumentType())
+						&& !"yp".equals(r.getDocumentType()))
 				.toList();
 		if (!otherResults.isEmpty()) {
 			log.warn("알 수 없는 documentType 결과: {}건", otherResults.size());
@@ -623,6 +628,30 @@ public class GeminiTextService {
 							sb.append("\n");
 						}
 					}
+				}
+			}
+		}
+
+		if (!ypResults.isEmpty()) {
+			sb.append("\n=== 관련 예규·판례 ===\n");
+			for (int i = 0; i < ypResults.size(); i++) {
+				var result = ypResults.get(i);
+				sb.append("\n[예규·판례 ").append(i + 1).append("]\n");
+
+				if (result.getTitle() != null) {
+					sb.append("제목: ").append(result.getTitle()).append("\n");
+				}
+
+				if (result.getContent() != null) {
+					String content = result.getContent();
+					if (content.length() > 800) {
+						content = content.substring(0, 800) + "...";
+					}
+					sb.append("내용: ").append(content).append("\n");
+				}
+
+				if (result.getSimilarityScore() != null) {
+					sb.append("유사도: ").append(String.format("%.2f", result.getSimilarityScore())).append("\n");
 				}
 			}
 		}

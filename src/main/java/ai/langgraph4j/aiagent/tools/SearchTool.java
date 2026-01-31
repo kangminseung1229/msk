@@ -88,12 +88,15 @@ public class SearchTool {
 		sb.append("검색어: ").append(query).append("\n");
 		sb.append("검색 결과 (").append(results.size()).append("건):\n\n");
 
-		// 상담 결과와 법령 결과를 구분하여 표시
+		// 상담·법령·예규판례 결과를 구분하여 표시
 		List<SearchResult> counselResults = results.stream()
 				.filter(r -> "counsel".equals(r.getDocumentType()))
 				.toList();
 		List<SearchResult> lawArticleResults = results.stream()
 				.filter(r -> "lawArticle".equals(r.getDocumentType()))
+				.toList();
+		List<SearchResult> ypResults = results.stream()
+				.filter(r -> "yp".equals(r.getDocumentType()))
 				.toList();
 
 		if (!counselResults.isEmpty()) {
@@ -108,6 +111,14 @@ public class SearchTool {
 			sb.append("\n=== 법령 조문 (").append(lawArticleResults.size()).append("건) ===\n\n");
 			for (int i = 0; i < lawArticleResults.size(); i++) {
 				SearchResult result = lawArticleResults.get(i);
+				formatSearchResult(sb, i + 1, result, false);
+			}
+		}
+
+		if (!ypResults.isEmpty()) {
+			sb.append("\n=== 예규·판례 (").append(ypResults.size()).append("건) ===\n\n");
+			for (int i = 0; i < ypResults.size(); i++) {
+				SearchResult result = ypResults.get(i);
 				formatSearchResult(sb, i + 1, result, false);
 			}
 		}

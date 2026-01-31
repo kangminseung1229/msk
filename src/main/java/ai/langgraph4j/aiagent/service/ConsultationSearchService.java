@@ -218,6 +218,17 @@ public class ConsultationSearchService {
 			List<Document> lawArticleDocuments = vectorStore.similaritySearch(lawArticleSearchRequest);
 			log.info("법령 데이터 검색 완료 - 결과 수: {} (임계값: {})", lawArticleDocuments.size(), lawArticleThreshold);
 
+			// 2b단계: 관련 예규·판례 검색 (documentType == 'yp', 상위 10건)
+			int ypTopK = 10;
+			SearchRequest ypSearchRequest = SearchRequest.builder()
+					.query(effectiveQuery)
+					.topK(ypTopK)
+					.similarityThreshold(lawArticleThreshold)
+					.filterExpression("documentType == 'yp'")
+					.build();
+			List<Document> ypDocuments = vectorStore.similaritySearch(ypSearchRequest);
+			log.info("관련 예규·판례 검색 완료 - 결과 수: {} (임계값: {})", ypDocuments.size(), lawArticleThreshold);
+
 			// 검색 결과가 없을 때 디버깅 정보 출력
 			if (lawArticleDocuments.isEmpty()) {
 				log.warn("법령 데이터 검색 결과가 없습니다. " +
@@ -325,6 +336,21 @@ public class ConsultationSearchService {
 			log.info("연관 법령 검색 결과 추가 완료 - {}건 추가됨 (전체 연관 법령 검색 결과: {}건)", 
 					addedRelatedLawArticles, relatedLawArticleDocuments.size());
 
+			// 예규·판례 결과 추가 (ypId 기준 중복 제거)
+			int addedYp = 0;
+			int ypIndex = 0;
+			for (Document doc : ypDocuments) {
+				Map<String, Object> meta = doc.getMetadata();
+				Long ypId = extractLong(meta, "ypId");
+				String key = "yp:" + (ypId != null ? ypId : ("noid-" + (ypIndex++)));
+				if (!resultMap.containsKey(key)) {
+					SearchResult result = convertYpToSearchResult(doc);
+					resultMap.put(key, result);
+					addedYp++;
+				}
+			}
+			log.info("예규·판례 검색 결과 추가 완료 - {}건 추가됨 (전체 예규·판례 검색 결과: {}건)", addedYp, ypDocuments.size());
+
 			List<SearchResult> results = new ArrayList<>(resultMap.values());
 			
 			// 최종 결과 분류 확인
@@ -334,8 +360,11 @@ public class ConsultationSearchService {
 			long finalLawArticleCount = results.stream()
 					.filter(r -> "lawArticle".equals(r.getDocumentType()))
 					.count();
-			log.info("하이브리드 검색 완료 - 통합 결과 수: {} (상담: {}건, 법령: {}건)", 
-					results.size(), finalCounselCount, finalLawArticleCount);
+			long finalYpCount = results.stream()
+					.filter(r -> "yp".equals(r.getDocumentType()))
+					.count();
+			log.info("하이브리드 검색 완료 - 통합 결과 수: {} (상담: {}건, 법령: {}건, 예규·판례: {}건)", 
+					results.size(), finalCounselCount, finalLawArticleCount, finalYpCount);
 
 			return results;
 
@@ -573,6 +602,46 @@ public class ConsultationSearchService {
 				.similarityScore(similarityScore)
 				.documentType(documentType != null ? documentType : "lawArticle")
 				.lawArticles(List.of(lawArticleInfo))
+				.build();
+	}
+
+	/**
+	 * 예규·판례 Document를 SearchResult로 변환
+	 *
+	 * @param document 예규·판례 Document (documentType == 'yp')
+	 * @return SearchResult
+	 */
+	private SearchResult convertYpToSearchResult(Document document) {
+		Map<String, Object> metadata = document.getMetadata();
+
+		Long ypId = extractLong(metadata, "ypId");
+		String title = extractString(metadata, "title");
+		String documentNumber = extractString(metadata, "documentNumber");
+		String documentDate = extractString(metadata, "documentDate");
+		Integer chunkIndex = extractInteger(metadata, "chunkIndex");
+		Integer totalChunks = extractInteger(metadata, "totalChunks");
+		String documentType = extractString(metadata, "documentType");
+
+		Double similarityScore = document.getScore();
+
+		// 제목이 없으면 문서번호·문서일자로 대체
+		String displayTitle = title;
+		if (displayTitle == null || displayTitle.isBlank()) {
+			displayTitle = (documentNumber != null ? documentNumber : "") +
+					(documentDate != null ? " " + documentDate : "");
+		}
+		if (displayTitle != null && displayTitle.isBlank()) {
+			displayTitle = "예규·판례 (ypId: " + ypId + ")";
+		}
+
+		return SearchResult.builder()
+				.ypId(ypId)
+				.title(displayTitle)
+				.content(document.getText())
+				.chunkIndex(chunkIndex)
+				.totalChunks(totalChunks)
+				.similarityScore(similarityScore)
+				.documentType(documentType != null ? documentType : "yp")
 				.build();
 	}
 

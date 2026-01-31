@@ -57,9 +57,14 @@ public class SearchResult {
 	private Double similarityScore;
 
 	/**
-	 * 문서 타입 ("counsel" 또는 "lawArticle")
+	 * 문서 타입 ("counsel", "lawArticle", "yp")
 	 */
 	private String documentType;
+
+	/**
+	 * 예규·판례 ID (documentType == "yp"일 때)
+	 */
+	private Long ypId;
 
 	/**
 	 * 연관 법령 조문 정보 리스트
