@@ -41,6 +41,7 @@ public class ChatV2Service {
 	private final ResponseNode responseNode;
 	private final ValidationNode validationNode;
 	private final SessionStore sessionStore;
+	private final ChatSessionPersistenceService chatSessionPersistenceService;
 	private final ResourceLoader resourceLoader;
 	private final RelatedReferencesHolder relatedReferencesHolder;
 
@@ -88,8 +89,11 @@ public class ChatV2Service {
 		// 답변 검수
 		finalState = validationNode.validate(finalState);
 
-		// 대화 히스토리 저장
+		// 대화 히스토리 저장 (Redis)
 		saveToHistory(sessionId, userMessage, finalState.getAiMessage());
+
+		// DB 영구 저장 (저장 버튼 없이 항상 저장)
+		chatSessionPersistenceService.persistTurn(sessionId, userMessage, finalState.getAiMessage());
 
 		// 세션 저장
 		sessionStore.saveSession(sessionId, finalState);
@@ -180,8 +184,11 @@ public class ChatV2Service {
 				// 답변 검수 (비동기로 수행, 스트리밍에는 영향 없음)
 				finalState = validationNode.validate(finalState);
 
-				// 대화 히스토리 저장
+				// 대화 히스토리 저장 (Redis)
 				saveToHistory(finalSessionId, userMessage, finalState.getAiMessage());
+
+				// DB 영구 저장 (저장 버튼 없이 항상 저장)
+				chatSessionPersistenceService.persistTurn(finalSessionId, userMessage, finalState.getAiMessage());
 
 				// 세션 저장
 				sessionStore.saveSession(finalSessionId, finalState);

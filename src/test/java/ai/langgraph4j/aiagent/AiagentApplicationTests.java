@@ -18,12 +18,14 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
 import org.springframework.test.context.ActiveProfiles;
 
+import com.google.genai.Client;
+
 import ai.langgraph4j.aiagent.repository.TaxLawCodeRepository;
+import ai.langgraph4j.aiagent.service.ChatSessionPersistenceService;
 import ai.langgraph4j.aiagent.service.ConsultationSearchService;
 import ai.langgraph4j.aiagent.service.CounselEmbeddingService;
 import ai.langgraph4j.aiagent.service.LawArticleEmbeddingService;
-
-import com.google.genai.Client;
+import ai.langgraph4j.aiagent.service.YpEmbeddingService;
 
 /**
  * Spring Boot 애플리케이션 컨텍스트 로딩 테스트
@@ -46,6 +48,12 @@ class AiagentApplicationTests {
 
 	@MockBean
 	TaxLawCodeRepository taxLawCodeRepository;
+
+	@MockBean
+	YpEmbeddingService ypEmbeddingService;
+
+	@MockBean
+	ChatSessionPersistenceService chatSessionPersistenceService;
 
 	@TestConfiguration(proxyBeanMethods = false)
 	static class TestConfig {

@@ -4,6 +4,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -15,6 +16,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import ai.langgraph4j.aiagent.controller.dto.ChatV2Request;
 import ai.langgraph4j.aiagent.controller.dto.ChatV2Response;
 import ai.langgraph4j.aiagent.controller.dto.ErrorResponse;
+import ai.langgraph4j.aiagent.service.ChatSessionPersistenceService;
 import ai.langgraph4j.aiagent.service.ChatV2Service;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -37,6 +39,7 @@ import lombok.extern.slf4j.Slf4j;
 public class ChatV2Controller {
 
 	private final ChatV2Service chatV2Service;
+	private final ChatSessionPersistenceService chatSessionPersistenceService;
 
 	/**
 	 * 채팅 실행 (비스트리밍)
@@ -46,7 +49,7 @@ public class ChatV2Controller {
 	 */
 	@PostMapping
 	public ResponseEntity<?> chat(@Valid @RequestBody ChatV2Request request) {
-		log.info("ChatV2Controller: 채팅 요청 - message: {}, sessionId: {}", 
+		log.info("ChatV2Controller: 채팅 요청 - message: {}, sessionId: {}",
 				request.getMessage(), request.getSessionId());
 
 		try {
@@ -77,7 +80,7 @@ public class ChatV2Controller {
 	 */
 	@PostMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
 	public SseEmitter chatStreaming(@Valid @RequestBody ChatV2Request request) {
-		log.info("ChatV2Controller: 스트리밍 채팅 요청 - message: {}, sessionId: {}", 
+		log.info("ChatV2Controller: 스트리밍 채팅 요청 - message: {}, sessionId: {}",
 				request.getMessage(), request.getSessionId());
 		return chatV2Service.chatStreaming(request);
 	}
@@ -85,8 +88,8 @@ public class ChatV2Controller {
 	/**
 	 * 채팅 실행 (GET 요청, 비스트리밍)
 	 * 
-	 * @param message 사용자 메시지
-	 * @param sessionId 세션 ID (선택사항)
+	 * @param message           사용자 메시지
+	 * @param sessionId         세션 ID (선택사항)
 	 * @param systemInstruction System Instruction (선택사항)
 	 * @return 채팅 응답
 	 */
@@ -95,21 +98,21 @@ public class ChatV2Controller {
 			@RequestParam(name = "message") String message,
 			@RequestParam(name = "sessionId", required = false) String sessionId,
 			@RequestParam(name = "systemInstruction", required = false) String systemInstruction) {
-		
+
 		ChatV2Request request = ChatV2Request.builder()
 				.message(message)
 				.sessionId(sessionId)
 				.systemInstruction(systemInstruction)
 				.build();
-		
+
 		return chat(request);
 	}
 
 	/**
 	 * 채팅 실행 (GET 요청, 스트리밍)
 	 * 
-	 * @param message 사용자 메시지
-	 * @param sessionId 세션 ID (선택사항)
+	 * @param message           사용자 메시지
+	 * @param sessionId         세션 ID (선택사항)
 	 * @param systemInstruction System Instruction (선택사항)
 	 * @return SseEmitter
 	 */
@@ -118,14 +121,41 @@ public class ChatV2Controller {
 			@RequestParam(name = "message") String message,
 			@RequestParam(name = "sessionId", required = false) String sessionId,
 			@RequestParam(name = "systemInstruction", required = false) String systemInstruction) {
-		
+
 		ChatV2Request request = ChatV2Request.builder()
 				.message(message)
 				.sessionId(sessionId)
 				.systemInstruction(systemInstruction)
 				.build();
-		
+
 		return chatStreaming(request);
+	}
+
+	/**
+	 * 세션 목록 조회 (왼쪽 탭용, 최신순)
+	 *
+	 * @param page 페이지 (0부터)
+	 * @param size 페이지 크기
+	 * @return 세션 목록
+	 */
+	@GetMapping("/sessions")
+	public ResponseEntity<?> listSessions(
+			@RequestParam(name = "page", defaultValue = "0") int page,
+			@RequestParam(name = "size", defaultValue = "50") int size) {
+		return ResponseEntity.ok(chatSessionPersistenceService.listSessions(page, size));
+	}
+
+	/**
+	 * 세션의 대화 히스토리 조회
+	 *
+	 * @param sessionId 세션 ID (예: session-uuid)
+	 * @return 세션 정보 + 메시지 목록
+	 */
+	@GetMapping("/sessions/{sessionId}")
+	public ResponseEntity<?> getSessionWithMessages(@PathVariable String sessionId) {
+		return chatSessionPersistenceService.getSessionWithMessages(sessionId)
+				.map(ResponseEntity::ok)
+				.orElse(ResponseEntity.notFound().build());
 	}
 
 	/**
