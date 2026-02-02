@@ -640,13 +640,15 @@ public class ConsultationSearchService {
 
 		Double similarityScore = document.getScore();
 
-		// 제목이 없으면 문서번호·문서일자로 대체
-		String displayTitle = title;
+		// YP 타입은 documentNumber를 우선적으로 사용하여 제목 구성
+		String displayTitle = documentNumber;
 		if (displayTitle == null || displayTitle.isBlank()) {
-			displayTitle = (documentNumber != null ? documentNumber : "") +
-					(documentDate != null ? " " + documentDate : "");
+			displayTitle = title;
 		}
-		if (displayTitle != null && displayTitle.isBlank()) {
+		if (displayTitle == null || displayTitle.isBlank()) {
+			displayTitle = (documentDate != null ? documentDate : "");
+		}
+		if (displayTitle == null || displayTitle.isBlank()) {
 			displayTitle = "예규·판례 (ypId: " + ypId + ")";
 		}
 
