@@ -159,6 +159,17 @@ public class ChatV2Controller {
 	}
 
 	/**
+	 * DB에 저장된 세션을 Redis에 복원 (이전 세션 클릭 시 문맥 유지)
+	 *
+	 * @param sessionId 세션 ID
+	 */
+	@PostMapping("/sessions/{sessionId}/restore")
+	public ResponseEntity<Void> restoreSession(@PathVariable String sessionId) {
+		chatV2Service.restoreSessionFromDbToRedis(sessionId);
+		return ResponseEntity.ok().build();
+	}
+
+	/**
 	 * 채팅 v2 데모 페이지
 	 * 
 	 * @return 데모 페이지

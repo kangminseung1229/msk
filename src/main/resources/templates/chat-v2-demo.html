@@ -18,21 +18,131 @@
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             min-height: 100vh;
+            margin: 0;
+            padding: 0;
+        }
+
+        .app-layout {
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* 왼쪽 세션 목록 사이드바 */
+        .sidebar {
+            width: 0;
+            min-width: 0;
+            background: #f8f9fa;
+            border-right: 1px solid #e0e0e0;
+            display: flex;
+            flex-direction: column;
+            transition: min-width 0.25s ease, width 0.25s ease;
+            overflow: hidden;
+        }
+
+        .sidebar.open {
+            width: 280px;
+            min-width: 280px;
+        }
+
+        .sidebar-header {
+            padding: 16px;
+            border-bottom: 1px solid #e0e0e0;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: white;
+            flex-shrink: 0;
+        }
+
+        .sidebar-header h2 {
+            font-size: 15px;
+            font-weight: 600;
+            color: #333;
+        }
+
+        .sidebar-close {
+            background: none;
+            border: none;
+            padding: 4px 8px;
+            cursor: pointer;
+            color: #666;
+            font-size: 18px;
+            line-height: 1;
+        }
+
+        .sidebar-close:hover {
+            color: #333;
+        }
+
+        .session-list {
+            flex: 1;
+            overflow-y: auto;
+            list-style: none;
+            padding: 8px 0;
+            margin: 0;
+        }
+
+        .session-item {
+            padding: 12px 16px;
+            cursor: pointer;
+            border-bottom: 1px solid #eee;
+            transition: background 0.15s;
+        }
+
+        .session-item:hover {
+            background: #e8e8e8;
+        }
+
+        .session-item.active {
+            background: #e0e4f0;
+            border-left: 3px solid #667eea;
+        }
+
+        .session-item-title {
+            font-size: 13px;
+            font-weight: 500;
+            color: #333;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .session-item-meta {
+            font-size: 11px;
+            color: #888;
+            margin-top: 4px;
+        }
+
+        .sidebar-empty {
+            padding: 24px 16px;
+            text-align: center;
+            color: #999;
+            font-size: 13px;
+        }
+
+        .sidebar-overlay {
+            display: none;
+        }
+
+        .main-content {
+            flex: 1;
+            min-width: 0;
             display: flex;
             justify-content: center;
             align-items: stretch;
-            padding: 0;
+            overflow: hidden;
         }
 
         .container {
             background: white;
-            border-radius: 16px;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            border-radius: 0;
+            box-shadow: none;
             width: 100%;
             max-width: 1000px;
             display: flex;
             flex-direction: column;
-            height: 100vh;
+            height: 100%;
         }
 
         .header {
@@ -47,6 +157,9 @@
             color: #333;
             font-size: 24px;
             font-weight: 600;
+            flex: 1;
+            text-align: center;
+            min-width: 0;
         }
 
         .session-info {
@@ -81,6 +194,21 @@
 
         .btn-small:hover {
             background: #5568d3;
+        }
+
+        .btn-sidebar-toggle {
+            background: #f0f0f0;
+            color: #555;
+            border: 1px solid #ddd;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            cursor: pointer;
+            margin-right: 8px;
+        }
+
+        .btn-sidebar-toggle:hover {
+            background: #e5e5e5;
         }
 
         .chat-container {
@@ -492,6 +620,30 @@
             font-size: 13px;
         }
 
+        /* 모바일: 사이드바 오버레이 */
+        @media (max-width: 768px) {
+            .sidebar.open {
+                position: fixed;
+                left: 0;
+                top: 0;
+                bottom: 0;
+                z-index: 100;
+                box-shadow: 4px 0 12px rgba(0, 0, 0, 0.15);
+            }
+
+            .sidebar-overlay {
+                display: none;
+                position: fixed;
+                inset: 0;
+                background: rgba(0, 0, 0, 0.3);
+                z-index: 99;
+            }
+
+            .sidebar-overlay.visible {
+                display: block;
+            }
+        }
+
         /* 반응형: 태블릿 */
         @media (max-width: 768px) {
             .container {
@@ -628,41 +780,58 @@
 </head>
 
 <body>
-    <div class="container">
-        <div class="header">
-            <h1>💬 채팅 v2 데모 - LangGraph 기반</h1>
-            <div class="session-info">
-                <span>세션:</span>
-                <span class="session-id" id="sessionId">새 세션</span>
-                <button class="btn-small" onclick="newSession()">새 세션</button>
+    <div class="app-layout">
+        <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSessionSidebar()"></div>
+        <aside class="sidebar" id="sessionSidebar">
+            <div class="sidebar-header">
+                <h2>세션 목록</h2>
+                <button type="button" class="sidebar-close" onclick="toggleSessionSidebar()" aria-label="닫기">×</button>
             </div>
-        </div>
+            <ul class="session-list" id="sessionList">
+                <li class="sidebar-empty">세션 목록을 불러오는 중...</li>
+            </ul>
+        </aside>
+        <main class="main-content">
+            <div class="container">
+                <div class="header">
+                    <button type="button" class="btn-sidebar-toggle" onclick="toggleSessionSidebar()"
+                        aria-label="세션 목록">☰ 세션 목록</button>
+                    <h1>💬 채팅 v2 데모 - LangGraph 기반</h1>
+                    <div class="session-info">
+                        <span>세션:</span>
+                        <span class="session-id" id="sessionId">새 세션</span>
+                        <button class="btn-small" onclick="newSession()">새 세션</button>
+                    </div>
+                </div>
 
-        <div class="chat-container" id="chatContainer">
-            <div class="empty-state">
-                <div class="empty-state-icon">💭</div>
-                <div>대화를 시작해보세요!</div>
-            </div>
-        </div>
+                <div class="chat-container" id="chatContainer">
+                    <div class="empty-state">
+                        <div class="empty-state-icon">💭</div>
+                        <div>대화를 시작해보세요!</div>
+                    </div>
+                </div>
 
-        <div id="status" class="status hidden"></div>
+                <div id="status" class="status hidden"></div>
 
-        <div class="input-container">
-            <button class="settings-toggle" onclick="toggleSettings()">⚙️ 설정</button>
-            <div class="settings-panel" id="settingsPanel">
-                <div class="settings-group">
-                    <label>System Instruction (선택사항)</label>
-                    <textarea id="systemInstruction" placeholder="예: 당신은 세무 전문가입니다. 정확하고 친절하게 답변하세요."></textarea>
+                <div class="input-container">
+                    <button class="settings-toggle" onclick="toggleSettings()">⚙️ 설정</button>
+                    <div class="settings-panel" id="settingsPanel">
+                        <div class="settings-group">
+                            <label>System Instruction (선택사항)</label>
+                            <textarea id="systemInstruction"
+                                placeholder="예: 당신은 세무 전문가입니다. 정확하고 친절하게 답변하세요."></textarea>
+                        </div>
+                    </div>
+                    <form id="chatForm" class="input-form">
+                        <div class="input-group">
+                            <label for="message">메시지</label>
+                            <textarea id="message" name="message" required placeholder="질문을 입력하세요..."></textarea>
+                        </div>
+                        <button type="submit" id="submitBtn">전송</button>
+                    </form>
                 </div>
             </div>
-            <form id="chatForm" class="input-form">
-                <div class="input-group">
-                    <label for="message">메시지</label>
-                    <textarea id="message" name="message" required placeholder="질문을 입력하세요..."></textarea>
-                </div>
-                <button type="submit" id="submitBtn">전송</button>
-            </form>
-        </div>
+        </main>
     </div>
 
     <script>
@@ -673,6 +842,9 @@
         const status = document.getElementById('status');
         const sessionIdDisplay = document.getElementById('sessionId');
         const settingsPanel = document.getElementById('settingsPanel');
+        const sessionSidebar = document.getElementById('sessionSidebar');
+        const sessionListEl = document.getElementById('sessionList');
+        const sidebarOverlay = document.getElementById('sidebarOverlay');
 
         let currentSessionId = localStorage.getItem('chatV2SessionId');
         let abortController = null;
@@ -697,9 +869,160 @@
         // 페이지 로드 시 세션 ID 복원
         if (currentSessionId) {
             sessionIdDisplay.textContent = currentSessionId;
+            // 현재 세션이 있으면 대화 내역을 먼저 불러와 렌더링
+            loadSessionMessages(currentSessionId);
+            // 문맥 유지를 위해 Redis에도 복원
+            restoreSessionToRedis(currentSessionId);
         } else {
             // 세션 ID가 없으면 표시만 업데이트
             sessionIdDisplay.textContent = '새 세션 (첫 메시지 전송 시 생성)';
+        }
+
+        /**
+         * 왼쪽 세션 목록 사이드바 열기/닫기
+         */
+        function toggleSessionSidebar() {
+            const open = sessionSidebar.classList.toggle('open');
+            if (sidebarOverlay) {
+                sidebarOverlay.classList.toggle('visible', open);
+            }
+            if (open) {
+                loadSessionList();
+            }
+        }
+
+        /**
+         * 세션 목록 API 조회 후 렌더링
+         */
+        async function loadSessionList() {
+            const basePath = window.location.pathname.replace(/\/demo\/?$/, '') || '/api/v2/chat';
+            sessionListEl.innerHTML = '<li class="sidebar-empty">불러오는 중...</li>';
+            try {
+                const res = await fetch(`${basePath}/sessions?page=0&size=50`);
+                if (!res.ok) throw new Error('세션 목록 조회 실패');
+                const list = await res.json();
+                if (!Array.isArray(list) || list.length === 0) {
+                    sessionListEl.innerHTML = '<li class="sidebar-empty">저장된 세션이 없습니다.</li>';
+                    return;
+                }
+                sessionListEl.innerHTML = '';
+                list.forEach(function (s) {
+                    const li = document.createElement('li');
+                    li.className = 'session-item' + (s.sessionId === currentSessionId ? ' active' : '');
+                    li.dataset.sessionId = s.sessionId || '';
+                    const title = document.createElement('div');
+                    title.className = 'session-item-title';
+                    title.textContent = (s.title || s.sessionId || '제목 없음').trim();
+                    const meta = document.createElement('div');
+                    meta.className = 'session-item-meta';
+                    meta.textContent = s.updatedAt ? formatSessionDate(s.updatedAt) : '';
+                    li.appendChild(title);
+                    li.appendChild(meta);
+                    li.addEventListener('click', function () {
+                        switchToSession(s.sessionId);
+                    });
+                    sessionListEl.appendChild(li);
+                });
+            } catch (e) {
+                console.warn('세션 목록 로드 실패:', e);
+                sessionListEl.innerHTML = '<li class="sidebar-empty">목록을 불러올 수 없습니다.</li>';
+            }
+        }
+
+        function formatSessionDate(isoStr) {
+            if (!isoStr) return '';
+            try {
+                const d = new Date(isoStr);
+                const now = new Date();
+                const sameDay = d.getDate() === now.getDate() && d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+                if (sameDay) {
+                    return '오늘 ' + d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+                }
+                return d.toLocaleDateString('ko-KR', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+            } catch (e) {
+                return isoStr;
+            }
+        }
+
+        /**
+         * 선택한 세션으로 전환: 현재 세션 갱신 후 대화 내역 렌더링
+         */
+        function switchToSession(sessionId) {
+            if (!sessionId) return;
+            currentSessionId = sessionId;
+            localStorage.setItem('chatV2SessionId', sessionId);
+            sessionIdDisplay.textContent = sessionId;
+
+            chatContainer.innerHTML = '';
+            const emptyState = document.createElement('div');
+            emptyState.className = 'empty-state';
+            emptyState.innerHTML = '<div class="empty-state-icon">💭</div><div>대화를 불러오는 중...</div>';
+            chatContainer.appendChild(emptyState);
+
+            loadSessionMessages(sessionId);
+            restoreSessionToRedis(sessionId);
+
+            sessionListEl.querySelectorAll('.session-item').forEach(function (el) {
+                el.classList.toggle('active', el.dataset.sessionId === sessionId);
+            });
+            toggleSessionSidebar();
+        }
+
+        /**
+         * DB에 저장된 세션을 Redis에 복원 (다음 메시지부터 문맥 유지)
+         */
+        function restoreSessionToRedis(sessionId) {
+            if (!sessionId || sessionId.trim() === '') return;
+            const basePath = window.location.pathname.replace(/\/demo\/?$/, '') || '/api/v2/chat';
+            fetch(`${basePath}/sessions/${encodeURIComponent(sessionId)}/restore`, { method: 'POST' })
+                .then(function (res) {
+                    if (!res.ok) console.warn('세션 Redis 복원 실패:', res.status);
+                })
+                .catch(function (e) { console.warn('세션 Redis 복원 요청 실패:', e); });
+        }
+
+        /**
+         * 세션의 대화 내역을 API로 조회한 뒤 채팅 영역에 렌더링
+         */
+        async function loadSessionMessages(sessionId) {
+            if (!sessionId || sessionId.trim() === '') return;
+            const basePath = window.location.pathname.replace(/\/demo\/?$/, '') || '/api/v2/chat';
+            try {
+                const res = await fetch(`${basePath}/sessions/${encodeURIComponent(sessionId)}`);
+                if (!res.ok) {
+                    if (res.status === 404) return;
+                    throw new Error('세션 조회 실패');
+                }
+                const data = await res.json();
+                const messages = data.messages;
+                if (!Array.isArray(messages) || messages.length === 0) {
+                    const emptyState = chatContainer.querySelector('.empty-state');
+                    if (emptyState) {
+                        emptyState.innerHTML = '<div class="empty-state-icon">💭</div><div>대화를 시작해보세요!</div>';
+                    }
+                    return;
+                }
+
+                const emptyState = chatContainer.querySelector('.empty-state');
+                if (emptyState) emptyState.remove();
+
+                messages
+                    .sort((a, b) => (a.sequenceOrder ?? 0) - (b.sequenceOrder ?? 0))
+                    .forEach(function (m) {
+                        const role = (m.role || '').toLowerCase();
+                        const content = m.content || '';
+                        if (role === 'user' || role === 'ai') {
+                            addMessage(role, content);
+                        }
+                    });
+                chatContainer.scrollTop = chatContainer.scrollHeight;
+            } catch (e) {
+                console.warn('세션 대화 내역 로드 실패:', e);
+                const emptyState = chatContainer.querySelector('.empty-state');
+                if (emptyState) {
+                    emptyState.innerHTML = '<div class="empty-state-icon">💭</div><div>대화를 불러올 수 없습니다.</div>';
+                }
+            }
         }
 
         chatForm.addEventListener('submit', function (e) {
@@ -1125,7 +1448,13 @@
             if (confirm('새 세션을 시작하시겠습니까? 현재 대화 내용은 유지되지만 서버의 세션은 초기화됩니다.')) {
                 currentSessionId = null;
                 localStorage.removeItem('chatV2SessionId');
-                sessionIdDisplay.textContent = '새 세션';
+                sessionIdDisplay.textContent = '새 세션 (첫 메시지 전송 시 생성)';
+                // 채팅 영역 비우고 빈 상태 표시
+                chatContainer.innerHTML = '';
+                const emptyState = document.createElement('div');
+                emptyState.className = 'empty-state';
+                emptyState.innerHTML = '<div class="empty-state-icon">💭</div><div>대화를 시작해보세요!</div>';
+                chatContainer.appendChild(emptyState);
             }
         }
 

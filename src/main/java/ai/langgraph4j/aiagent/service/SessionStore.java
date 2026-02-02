@@ -37,11 +37,11 @@ public class SessionStore {
 
 	private final RedisTemplate<String, String> redisTemplate;
 	private final ObjectMapper objectMapper;
-	
+
 	private static final String SESSION_KEY_PREFIX = "chat:session:";
 	private static final String HISTORY_KEY_PREFIX = "chat:history:";
 	private static final long SESSION_TTL_HOURS = 24; // 세션 만료 시간: 24시간
-	
+
 	/**
 	 * 대화 히스토리 최대 메시지 수
 	 * 0 또는 음수로 설정하면 제한 없음 (모든 히스토리 유지)
@@ -54,7 +54,7 @@ public class SessionStore {
 	 * 세션의 AgentState를 Redis에 저장
 	 * 
 	 * @param sessionId 세션 ID
-	 * @param state AgentState
+	 * @param state     AgentState
 	 */
 	public void saveSession(String sessionId, AgentState state) {
 		if (sessionId == null || sessionId.isBlank()) {
@@ -64,20 +64,20 @@ public class SessionStore {
 
 		try {
 			String sessionKey = SESSION_KEY_PREFIX + sessionId;
-			
+
 			// AgentState를 DTO로 변환하여 저장
 			AgentStateDto stateDto = AgentStateDto.fromAgentState(state);
 			String stateJson = objectMapper.writeValueAsString(stateDto);
-			
+
 			redisTemplate.opsForValue().set(sessionKey, stateJson, SESSION_TTL_HOURS, TimeUnit.HOURS);
 			log.debug("SessionStore: 세션 저장 완료 - sessionId: {}", sessionId);
 		} catch (RedisConnectionFailureException e) {
-			log.error("SessionStore: Redis 연결 실패로 세션 저장 실패 - sessionId: {}, 오류: {}", 
+			log.error("SessionStore: Redis 연결 실패로 세션 저장 실패 - sessionId: {}, 오류: {}",
 					sessionId, e.getMessage());
 			// Redis 연결 실패는 심각한 문제이므로 상세 로깅
 			log.error("SessionStore: Redis 연결 상태를 확인하세요. Redis 서비스가 실행 중인지 확인하세요.", e);
 		} catch (Exception e) {
-			log.error("SessionStore: 세션 저장 중 오류 발생 - sessionId: {}, 오류 타입: {}, 메시지: {}", 
+			log.error("SessionStore: 세션 저장 중 오류 발생 - sessionId: {}, 오류 타입: {}, 메시지: {}",
 					sessionId, e.getClass().getSimpleName(), e.getMessage(), e);
 		}
 	}
@@ -97,7 +97,7 @@ public class SessionStore {
 		try {
 			String sessionKey = SESSION_KEY_PREFIX + sessionId;
 			String stateJson = redisTemplate.opsForValue().get(sessionKey);
-			
+
 			if (stateJson == null) {
 				log.debug("SessionStore: 세션을 찾을 수 없음 - sessionId: {} (새 세션이거나 만료됨)", sessionId);
 				return null;
@@ -106,17 +106,17 @@ public class SessionStore {
 			// DTO로 읽어서 AgentState로 변환
 			AgentStateDto stateDto = objectMapper.readValue(stateJson, AgentStateDto.class);
 			AgentState state = stateDto != null ? stateDto.toAgentState() : null;
-			
+
 			log.debug("SessionStore: 세션 조회 완료 - sessionId: {}", sessionId);
 			return state;
 		} catch (RedisConnectionFailureException e) {
-			log.error("SessionStore: Redis 연결 실패로 세션 조회 실패 - sessionId: {}, 오류: {}", 
+			log.error("SessionStore: Redis 연결 실패로 세션 조회 실패 - sessionId: {}, 오류: {}",
 					sessionId, e.getMessage());
 			// Redis 연결 실패는 심각한 문제이므로 상세 로깅
 			log.error("SessionStore: Redis 연결 상태를 확인하세요. Redis 서비스가 실행 중인지 확인하세요.", e);
 			return null;
 		} catch (Exception e) {
-			log.error("SessionStore: 세션 조회 중 오류 발생 - sessionId: {}, 오류 타입: {}, 메시지: {}", 
+			log.error("SessionStore: 세션 조회 중 오류 발생 - sessionId: {}, 오류 타입: {}, 메시지: {}",
 					sessionId, e.getClass().getSimpleName(), e.getMessage(), e);
 			return null;
 		}
@@ -125,9 +125,9 @@ public class SessionStore {
 	/**
 	 * 대화 히스토리를 Redis에 추가
 	 * 
-	 * @param sessionId 세션 ID
+	 * @param sessionId   세션 ID
 	 * @param userMessage 사용자 메시지
-	 * @param aiMessage AI 메시지
+	 * @param aiMessage   AI 메시지
 	 */
 	public void addToHistory(String sessionId, UserMessage userMessage, AiMessage aiMessage) {
 		if (sessionId == null || sessionId.isBlank()) {
@@ -137,10 +137,10 @@ public class SessionStore {
 
 		try {
 			String historyKey = HISTORY_KEY_PREFIX + sessionId;
-			
+
 			// 기존 히스토리 조회 (MessageDto 리스트)
 			List<MessageDto> history = getHistoryAsDtos(sessionId);
-			
+
 			// 새 메시지를 DTO로 변환하여 추가
 			if (userMessage != null) {
 				history.add(MessageDto.fromUserMessage(userMessage));
@@ -148,23 +148,50 @@ public class SessionStore {
 			if (aiMessage != null) {
 				history.add(MessageDto.fromAiMessage(aiMessage));
 			}
-			
+
 			// 토큰 비용 최적화: 최근 N개 메시지만 유지 (Sliding Window)
 			history = limitHistorySize(history);
-			
+
 			// 히스토리 저장 (MessageDto 리스트를 JSON으로 직렬화)
 			String historyJson = objectMapper.writeValueAsString(history);
 			redisTemplate.opsForValue().set(historyKey, historyJson, SESSION_TTL_HOURS, TimeUnit.HOURS);
-			
-			log.debug("SessionStore: 히스토리 추가 완료 - sessionId: {}, 히스토리 크기: {} (제한: {})", 
+
+			log.debug("SessionStore: 히스토리 추가 완료 - sessionId: {}, 히스토리 크기: {} (제한: {})",
 					sessionId, history.size(), maxHistoryMessages > 0 ? maxHistoryMessages : "무제한");
 		} catch (RedisConnectionFailureException e) {
-			log.error("SessionStore: Redis 연결 실패로 히스토리 추가 실패 - sessionId: {}, 오류: {}", 
+			log.error("SessionStore: Redis 연결 실패로 히스토리 추가 실패 - sessionId: {}, 오류: {}",
 					sessionId, e.getMessage());
 			log.error("SessionStore: Redis 연결 상태를 확인하세요. Redis 서비스가 실행 중인지 확인하세요.", e);
 		} catch (Exception e) {
-			log.error("SessionStore: 히스토리 추가 중 오류 발생 - sessionId: {}, 오류 타입: {}, 메시지: {}", 
+			log.error("SessionStore: 히스토리 추가 중 오류 발생 - sessionId: {}, 오류 타입: {}, 메시지: {}",
 					sessionId, e.getClass().getSimpleName(), e.getMessage(), e);
+		}
+	}
+
+	/**
+	 * DB 등 외부에서 불러온 대화 히스토리를 Redis에 전체 설정 (이전 세션 복원용)
+	 *
+	 * @param sessionId 세션 ID
+	 * @param history   설정할 히스토리 (MessageDto 리스트)
+	 */
+	public void setHistory(String sessionId, List<MessageDto> history) {
+		if (sessionId == null || sessionId.isBlank()) {
+			log.warn("SessionStore: 세션 ID가 없어 히스토리 설정을 건너뜁니다");
+			return;
+		}
+		if (history == null) {
+			history = new ArrayList<>();
+		}
+		try {
+			String historyKey = HISTORY_KEY_PREFIX + sessionId;
+			history = limitHistorySize(history);
+			String historyJson = objectMapper.writeValueAsString(history);
+			redisTemplate.opsForValue().set(historyKey, historyJson, SESSION_TTL_HOURS, TimeUnit.HOURS);
+			log.debug("SessionStore: 히스토리 설정 완료 (복원) - sessionId: {}, 크기: {}", sessionId, history.size());
+		} catch (RedisConnectionFailureException e) {
+			log.error("SessionStore: Redis 연결 실패로 히스토리 설정 실패 - sessionId: {}", sessionId, e);
+		} catch (Exception e) {
+			log.error("SessionStore: 히스토리 설정 중 오류 발생 - sessionId: {}", sessionId, e);
 		}
 	}
 
@@ -183,34 +210,35 @@ public class SessionStore {
 		try {
 			String historyKey = HISTORY_KEY_PREFIX + sessionId;
 			String historyJson = redisTemplate.opsForValue().get(historyKey);
-			
+
 			if (historyJson == null) {
 				log.debug("SessionStore: 히스토리를 찾을 수 없음 - sessionId: {} (새 세션이거나 만료됨)", sessionId);
 				return new ArrayList<>();
 			}
 
 			// JSON을 List<MessageDto>로 변환
-			TypeReference<List<MessageDto>> typeRef = new TypeReference<List<MessageDto>>() {};
+			TypeReference<List<MessageDto>> typeRef = new TypeReference<List<MessageDto>>() {
+			};
 			List<MessageDto> history = objectMapper.readValue(historyJson, typeRef);
-			
+
 			// 토큰 비용 최적화: 최근 N개 메시지만 반환 (이중 방어)
 			history = limitHistorySize(history != null ? history : new ArrayList<>());
-			
-			log.debug("SessionStore: 히스토리 조회 완료 - sessionId: {}, 히스토리 크기: {} (제한: {})", 
+
+			log.debug("SessionStore: 히스토리 조회 완료 - sessionId: {}, 히스토리 크기: {} (제한: {})",
 					sessionId, history.size(), maxHistoryMessages > 0 ? maxHistoryMessages : "무제한");
 			return history;
 		} catch (RedisConnectionFailureException e) {
-			log.error("SessionStore: Redis 연결 실패로 히스토리 조회 실패 - sessionId: {}, 오류: {}", 
+			log.error("SessionStore: Redis 연결 실패로 히스토리 조회 실패 - sessionId: {}, 오류: {}",
 					sessionId, e.getMessage());
 			log.error("SessionStore: Redis 연결 상태를 확인하세요. Redis 서비스가 실행 중인지 확인하세요.", e);
 			return new ArrayList<>();
 		} catch (Exception e) {
-			log.error("SessionStore: 히스토리 조회 중 오류 발생 - sessionId: {}, 오류 타입: {}, 메시지: {}", 
+			log.error("SessionStore: 히스토리 조회 중 오류 발생 - sessionId: {}, 오류 타입: {}, 메시지: {}",
 					sessionId, e.getClass().getSimpleName(), e.getMessage(), e);
 			return new ArrayList<>();
 		}
 	}
-	
+
 	/**
 	 * 히스토리 크기를 제한하여 최근 N개 메시지만 유지
 	 * 
@@ -222,19 +250,19 @@ public class SessionStore {
 			// 제한 없음
 			return history;
 		}
-		
+
 		if (history.size() <= maxHistoryMessages) {
 			// 제한보다 작거나 같으면 그대로 반환
 			return history;
 		}
-		
+
 		// 최근 N개만 유지 (앞부분 제거)
 		int startIndex = history.size() - maxHistoryMessages;
 		List<MessageDto> limitedHistory = new ArrayList<>(history.subList(startIndex, history.size()));
-		
-		log.debug("SessionStore: 히스토리 크기 제한 적용 - 원본: {}개, 제한 후: {}개", 
+
+		log.debug("SessionStore: 히스토리 크기 제한 적용 - 원본: {}개, 제한 후: {}개",
 				history.size(), limitedHistory.size());
-		
+
 		return limitedHistory;
 	}
 
@@ -246,19 +274,19 @@ public class SessionStore {
 	 */
 	public List<Object> getHistory(String sessionId) {
 		List<MessageDto> dtos = getHistoryAsDtos(sessionId);
-		
+
 		// MessageDto를 UserMessage/AiMessage로 변환
 		return dtos.stream()
-			.map(dto -> {
-				if ("USER".equals(dto.getType())) {
-					return dto.toUserMessage();
-				} else if ("AI".equals(dto.getType())) {
-					return dto.toAiMessage();
-				}
-				return null;
-			})
-			.filter(Objects::nonNull)
-			.collect(Collectors.toList());
+				.map(dto -> {
+					if ("USER".equals(dto.getType())) {
+						return dto.toUserMessage();
+					} else if ("AI".equals(dto.getType())) {
+						return dto.toAiMessage();
+					}
+					return null;
+				})
+				.filter(Objects::nonNull)
+				.collect(Collectors.toList());
 	}
 
 	/**
@@ -274,10 +302,10 @@ public class SessionStore {
 		try {
 			String sessionKey = SESSION_KEY_PREFIX + sessionId;
 			String historyKey = HISTORY_KEY_PREFIX + sessionId;
-			
+
 			redisTemplate.delete(sessionKey);
 			redisTemplate.delete(historyKey);
-			
+
 			log.debug("SessionStore: 세션 삭제 완료 - sessionId: {}", sessionId);
 		} catch (Exception e) {
 			log.error("SessionStore: 세션 삭제 중 오류 발생 - sessionId: {}", sessionId, e);
@@ -300,11 +328,11 @@ public class SessionStore {
 			Boolean exists = redisTemplate.hasKey(sessionKey);
 			return exists != null && exists;
 		} catch (RedisConnectionFailureException e) {
-			log.error("SessionStore: Redis 연결 실패로 세션 존재 확인 실패 - sessionId: {}, 오류: {}", 
+			log.error("SessionStore: Redis 연결 실패로 세션 존재 확인 실패 - sessionId: {}, 오류: {}",
 					sessionId, e.getMessage());
 			return false;
 		} catch (Exception e) {
-			log.error("SessionStore: 세션 존재 확인 중 오류 발생 - sessionId: {}, 오류 타입: {}, 메시지: {}", 
+			log.error("SessionStore: 세션 존재 확인 중 오류 발생 - sessionId: {}, 오류 타입: {}, 메시지: {}",
 					sessionId, e.getClass().getSimpleName(), e.getMessage(), e);
 			return false;
 		}

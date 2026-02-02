@@ -3,7 +3,10 @@ package ai.langgraph4j.aiagent.service;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.Comparator;
+import java.util.List;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.ResourceLoader;
@@ -18,6 +21,9 @@ import ai.langgraph4j.aiagent.agent.state.AgentState;
 import ai.langgraph4j.aiagent.controller.dto.ChatV2Request;
 import ai.langgraph4j.aiagent.controller.dto.ChatV2Response;
 import ai.langgraph4j.aiagent.controller.dto.RelatedReference;
+import ai.langgraph4j.aiagent.service.ChatSessionPersistenceService.ChatMessageDto;
+import ai.langgraph4j.aiagent.service.ChatSessionPersistenceService.ChatSessionWithMessagesDto;
+import ai.langgraph4j.aiagent.service.dto.MessageDto;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.UserMessage;
 import lombok.RequiredArgsConstructor;
@@ -310,6 +316,44 @@ public class ChatV2Service {
 	 */
 	private void saveToHistory(String sessionId, UserMessage userMessage, AiMessage aiMessage) {
 		sessionStore.addToHistory(sessionId, userMessage, aiMessage);
+	}
+
+	/**
+	 * DB에 저장된 세션의 대화 내역을 Redis에 복원 (이전 세션 클릭 시 문맥 유지용)
+	 *
+	 * @param sessionId 세션 ID
+	 */
+	public void restoreSessionFromDbToRedis(String sessionId) {
+		if (sessionId == null || sessionId.isBlank()) {
+			log.debug("ChatV2Service: restore 건너뜀 - sessionId 없음");
+			return;
+		}
+		try {
+			java.util.Optional<ChatSessionWithMessagesDto> opt = chatSessionPersistenceService
+					.getSessionWithMessages(sessionId);
+			if (opt.isEmpty()) {
+				log.debug("ChatV2Service: restore 건너뜀 - 세션 없음: {}", sessionId);
+				return;
+			}
+			List<ChatMessageDto> messages = opt.get().messages();
+			if (messages == null || messages.isEmpty()) {
+				log.debug("ChatV2Service: restore - 메시지 없음, 빈 세션만 Redis에 저장: {}", sessionId);
+			} else {
+				List<MessageDto> dtos = messages.stream()
+						.sorted(Comparator.comparingInt(ChatMessageDto::sequenceOrder))
+						.map(m -> "USER".equalsIgnoreCase(m.role())
+								? MessageDto.fromUserMessage(new UserMessage(m.content()))
+								: MessageDto.fromAiMessage(new AiMessage(m.content())))
+						.collect(Collectors.toList());
+				sessionStore.setHistory(sessionId, dtos);
+				log.info("ChatV2Service: Redis 복원 완료 - sessionId: {}, 메시지 수: {}", sessionId, dtos.size());
+			}
+			AgentState state = new AgentState();
+			state.setSessionId(sessionId);
+			sessionStore.saveSession(sessionId, state);
+		} catch (Exception e) {
+			log.warn("ChatV2Service: Redis 복원 실패 - sessionId: {}", sessionId, e);
+		}
 	}
 
 	/**
