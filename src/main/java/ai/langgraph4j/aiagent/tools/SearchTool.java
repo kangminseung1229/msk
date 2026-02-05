@@ -305,6 +305,9 @@ public class SearchTool {
 			// 검색 결과 포맷팅
 			String formattedResult = formatSearchResults(query, results);
 
+			// 관련 자료 참조 저장 (search()와 동일하게 링크용)
+			relatedReferencesHolder.setRefs(toRelatedReferences(results));
+
 			log.info("SearchTool: 벡터 검색 완료 - {}건의 결과 반환", results.size());
 			return formattedResult;
 
